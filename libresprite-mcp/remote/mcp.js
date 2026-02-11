@@ -143,7 +143,7 @@ var global = this;
      */
     function get(url, cb) {
         _get(url, function(rsp) {
-            var data, error = rsp.status != 200 ? 'status:' + rsp.status : 0;
+            var data, error = rsp.status !== 200 ? 'status:' + rsp.status : 0;
             try {
                 if (!error)
                     data = JSON.parse(rsp.string);
@@ -163,7 +163,7 @@ var global = this;
      */
     function post(url, body, cb) {
         _post(url, body, function(rsp) {
-            var data, error = rsp.status != 200 ? 'status:' + rsp.status : 0;
+            var data, error = rsp.status !== 200 ? 'status:' + rsp.status : 0;
             try {
                 if (!error)
                     data = JSON.parse(rsp.string);

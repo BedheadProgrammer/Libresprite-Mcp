@@ -152,6 +152,14 @@ class TestResources(unittest.TestCase):
         self.assertIn("JavaScript", content)
         self.assertNotIn("Lua scripting", content)
 
+    def test_reference_contains_key_api_elements(self):
+        content = read_reference()
+        self.assertIn("putPixel", content)
+        self.assertIn("pixelColor", content)
+        self.assertIn("rgba", content)
+        self.assertIn("activeImage", content)
+        self.assertIn("activeSprite", content)
+
     def test_examples_use_javascript_syntax(self):
         content = read_examples()
         self.assertIn("var ", content)
