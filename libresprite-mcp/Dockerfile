@@ -50,4 +50,4 @@ USER spriteuser
 ENV DISPLAY=:99
 
 # 7. Start command: Run Xvfb in background, then the Python Server
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & sleep 1 && python server.py"]
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & while ! test -e /tmp/.X99-lock; do sleep 0.1; done && python server.py"]

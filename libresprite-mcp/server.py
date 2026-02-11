@@ -247,6 +247,8 @@ def create_pixel_art(
             if idx >= len(colors):
                 return f"Error: character '{ch}' maps to palette index {idx} but only {len(colors)} colors defined."
             hex_color = colors[idx]
+            if len(hex_color) != 6 or not all(c in "0123456789abcdefABCDEF" for c in hex_color):
+                return f"Error: palette color must be exactly 6 hex digits (RRGGBB), got: '{hex_color}'."
             r = int(hex_color[0:2], 16)
             g = int(hex_color[2:4], 16)
             b = int(hex_color[4:6], 16)
@@ -254,12 +256,13 @@ def create_pixel_art(
                 f'    image:drawPixel({x}, {y}, Color({r}, {g}, {b}, 255))'
             )
 
-    lua_code = f"""\
-local spr = Sprite({width}, {height}, ColorMode.RGB)
-local cel = spr.cels[1]
-local image = cel.image
-{chr(10).join(lua_pixels)}
-"""
+    pixel_lines = "\n".join(lua_pixels)
+    lua_code = (
+        f"local spr = Sprite({width}, {height}, ColorMode.RGB)\n"
+        f"local cel = spr.cels[1]\n"
+        f"local image = cel.image\n"
+        f"{pixel_lines}\n"
+    )
 
     return generate_sprite(lua_code)
 
