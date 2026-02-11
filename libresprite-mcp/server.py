@@ -59,7 +59,7 @@ class LibrespriteProxy:
     def __init__(self, host: str = "localhost", port: int = 64823):
         self._script: str | None = None
         self._output: str | None = None
-        self._lock: bool = False
+        self._executing: bool = False
         self._script_event = threading.Event()
         self._output_event = threading.Event()
 
@@ -92,7 +92,7 @@ class LibrespriteProxy:
 
         @self.app.post("/")
         def post_output():
-            if not self._lock:
+            if not self._executing:
                 return jsonify({"status": "ignored"})
             req = flask_request.get_json(force=True, silent=True)
             if req:
@@ -129,22 +129,24 @@ class LibrespriteProxy:
 
     def run_script(self, script: str) -> str:
         """Send *script* to LibreSprite and block until output is received."""
-        if self._lock:
+        if self._executing:
             raise RuntimeError("Script execution is already in progress.")
 
-        self._lock = True
+        self._executing = True
         self._script = script
         self._script_event.set()
 
-        # Wait for LibreSprite to post output back.
+        # Wait for LibreSprite to post output back.  The first 15 s
+        # covers normal latency; the extra 45 s grace period handles the
+        # case where the user hasn't started the remote script yet (gives
+        # them time to react to a warning from the MCP client).
         if not self._output_event.wait(timeout=15):
-            # Give a longer grace period before giving up.
             self._output_event.wait(timeout=45)
         self._output_event.clear()
 
         output = self._output
         self._output = None
-        self._lock = False
+        self._executing = False
 
         if output is None:
             return (
