@@ -1,0 +1,14 @@
+services:
+  libresprite-mcp:
+    build: .
+    volumes:
+      - ./output:/app/output
+    # MCP communicates over stdio – keep stdin open and allocate a TTY
+    stdin_open: true
+    tty: true
+    # Limit resources to prevent runaway scripts
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
