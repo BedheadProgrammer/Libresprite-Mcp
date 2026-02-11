@@ -3,9 +3,10 @@ services:
     build: .
     volumes:
       - ./output:/app/output
-    # MCP communicates over stdio – keep stdin open and allocate a TTY
+    # MCP communicates over stdio – keep stdin open
     stdin_open: true
-    tty: true
+    environment:
+      - LIBRESPRITE_MODE=docker
     # Limit resources to prevent runaway scripts
     deploy:
       resources:

@@ -1,0 +1,280 @@
+# LibreSprite JavaScript Scripting Examples
+
+These examples demonstrate how to use the LibreSprite JavaScript scripting API
+to create and manipulate pixel art programmatically.
+
+---
+
+## Example 1: Fill image with random grayscale noise
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+var h = img.height;
+var w = img.width;
+
+for (var y = 0; y < h; ++y) {
+    for (var x = 0; x < w; ++x) {
+        var c = Math.random() * 256 >>> 0;
+        img.putPixel(x, y, col.rgba(c, c, c, 255));
+    }
+}
+```
+
+---
+
+## Example 2: Draw a single-color pixel on the active image
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+// Draw a red pixel at (5, 5)
+img.putPixel(5, 5, col.rgba(255, 0, 0, 255));
+```
+
+---
+
+## Example 3: Clear the active image with a solid color
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+// Fill the entire image with blue
+img.clear(col.rgba(0, 0, 255, 255));
+```
+
+---
+
+## Example 4: Read pixel data from the active image
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+var pixel = img.getPixel(0, 0);
+console.log("R:", col.rgbaR(pixel));
+console.log("G:", col.rgbaG(pixel));
+console.log("B:", col.rgbaB(pixel));
+console.log("A:", col.rgbaA(pixel));
+```
+
+---
+
+## Example 5: White-to-alpha conversion
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+
+for (var y = 0; y < img.height; ++y) {
+    for (var x = 0; x < img.width; ++x) {
+        var c = img.getPixel(x, y);
+        var v = (col.rgbaR(c) + col.rgbaG(c) + col.rgbaB(c)) / 3;
+        img.putPixel(x, y,
+            col.rgba(col.rgbaR(c), col.rgbaG(c), col.rgbaB(c), 255 - v));
+    }
+}
+```
+
+---
+
+## Example 6: Draw a filled rectangle using putPixel
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+
+// Draw a 10x10 green rectangle starting at (2, 2)
+var color = col.rgba(0, 255, 0, 255);
+for (var y = 2; y < 12; ++y) {
+    for (var x = 2; x < 12; ++x) {
+        img.putPixel(x, y, color);
+    }
+}
+```
+
+---
+
+## Example 7: Draw a simple checkerboard pattern
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+var white = col.rgba(255, 255, 255, 255);
+var black = col.rgba(0, 0, 0, 255);
+
+for (var y = 0; y < img.height; ++y) {
+    for (var x = 0; x < img.width; ++x) {
+        img.putPixel(x, y, (x + y) % 2 === 0 ? white : black);
+    }
+}
+```
+
+---
+
+## Example 8: Get image data as a Uint8Array and manipulate it
+
+```javascript
+var img = app.activeImage;
+var data = img.getImageData();
+
+// Invert all colors (RGBA format, 4 bytes per pixel)
+for (var i = 0; i < data.length; i += 4) {
+    data[i]     = 255 - data[i];     // R
+    data[i + 1] = 255 - data[i + 1]; // G
+    data[i + 2] = 255 - data[i + 2]; // B
+    // data[i + 3] is alpha, leave unchanged
+}
+
+img.putImageData(data);
+```
+
+---
+
+## Example 9: Query sprite properties
+
+```javascript
+var sprite = app.activeSprite;
+if (sprite) {
+    console.log("Width:", sprite.width);
+    console.log("Height:", sprite.height);
+    console.log("Color Mode:", sprite.colorMode);
+    console.log("Layers:", sprite.layerCount);
+    console.log("Filename:", sprite.filename);
+} else {
+    console.log("No active sprite.");
+}
+```
+
+---
+
+## Example 10: Work with layers
+
+```javascript
+var sprite = app.activeSprite;
+if (sprite) {
+    var layer = sprite.layer(0);
+    console.log("Layer name:", layer.name);
+    console.log("Is visible:", layer.isVisible);
+    console.log("Is editable:", layer.isEditable);
+    console.log("Cel count:", layer.celCount);
+}
+```
+
+---
+
+## Example 11: Create animation frames
+
+```javascript
+var sprite = app.activeSprite;
+var col = app.pixelColor;
+
+// Add 3 more frames (4 total) with different colored fills
+var colors = [
+    col.rgba(255, 0, 0, 255),   // red
+    col.rgba(0, 255, 0, 255),   // green
+    col.rgba(0, 0, 255, 255),   // blue
+];
+
+for (var i = 0; i < colors.length; i++) {
+    app.command.NewFrame();
+    var img = app.activeImage;
+    img.clear(colors[i]);
+}
+```
+
+---
+
+## Example 12: Draw a simple smiley face (16x16)
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+
+// Clear with yellow background
+var yellow = col.rgba(255, 220, 50, 255);
+var black = col.rgba(0, 0, 0, 255);
+var transparent = col.rgba(0, 0, 0, 0);
+
+img.clear(transparent);
+
+// Draw yellow circle (approximate)
+var cx = 7, cy = 7, r = 7;
+for (var y = 0; y < 16; ++y) {
+    for (var x = 0; x < 16; ++x) {
+        var dx = x - cx, dy = y - cy;
+        if (dx * dx + dy * dy <= r * r) {
+            img.putPixel(x, y, yellow);
+        }
+    }
+}
+
+// Eyes
+img.putPixel(5, 5, black);
+img.putPixel(9, 5, black);
+
+// Mouth
+for (var x = 4; x <= 10; ++x) {
+    var my = Math.round(9 + Math.abs(x - 7) * 0.5);
+    if (my < 16) img.putPixel(x, my, black);
+}
+```
+
+---
+
+## Example 13: Use commands with parameters
+
+```javascript
+// Change to RGB pixel format
+app.command.setParameter("format", "rgb");
+app.command.ChangePixelFormat();
+app.command.clearParameters();
+```
+
+---
+
+## Example 14: Save the active sprite
+
+```javascript
+var sprite = app.activeSprite;
+if (sprite) {
+    sprite.saveAs("/path/to/output.png", true);
+    console.log("Sprite saved.");
+} else {
+    console.log("No active sprite to save.");
+}
+```
+
+---
+
+## Example 15: Create pixel art from a grid pattern
+
+This pattern demonstrates how to draw pixel art from a 2D array definition.
+
+```javascript
+var col = app.pixelColor;
+var img = app.activeImage;
+
+// Define a simple 8x8 heart shape
+// 0 = transparent, 1 = red
+var pattern = [
+    [0, 1, 1, 0, 0, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 1, 0, 0],
+    [0, 0, 0, 1, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+];
+
+var palette = [
+    col.rgba(0, 0, 0, 0),       // 0 = transparent
+    col.rgba(255, 0, 0, 255),   // 1 = red
+];
+
+for (var y = 0; y < pattern.length; ++y) {
+    for (var x = 0; x < pattern[y].length; ++x) {
+        img.putPixel(x, y, palette[pattern[y][x]]);
+    }
+}
+```
