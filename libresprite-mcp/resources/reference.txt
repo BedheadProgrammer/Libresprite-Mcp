@@ -1,0 +1,353 @@
+# LibreSprite JavaScript Scripting API Reference
+
+LibreSprite uses JavaScript as its scripting language. Scripts run inside LibreSprite's
+built-in JS engine and have access to the following API objects and methods.
+
+---
+
+# global app [class App]
+## Properties:
+   - `platform`: read-only. Returns one of: emscripten, windows, macos, android, linux.
+   - `version`: read-only. Returns LibreSprite's current version as a string.
+   - `activeDocument`: read-only. Returns the currently active Document.
+   - `command`: read-only. Returns an object with functions for running commands.
+   - `activeSprite`: read-only. Returns the currently active Sprite.
+   - `activeLayerNumber`: read-only. Returns the number of the current layer.
+   - `activeImage`: read-only, can be null. Returns the current layer/frame's image.
+   - `pixelColor`: read-only. Returns an object with functions for color conversion.
+   - `activeFrameNumber`: read-only. Returns the number of the currently active animation frame.
+
+## Methods:
+   - `open()`:
+      returns: Nothing
+      Opens a document for editing
+
+   - `yield(event)`:
+     - event: Name of the event to be raised. The default is yield.
+      returns: Nothing
+      Schedules a yield event on the next frame
+
+   - `createDialog()`:
+      returns: A Dialog object
+      Creates a dialog window
+
+   - `documentation()`:
+      returns: Nothing
+      Prints API documentation text.
+
+---
+
+# [class Sprite]
+## Properties:
+   - `palette`: read-only. Returns the sprite's palette.
+   - `height`: read+write. Returns and sets the height of the sprite.
+   - `width`: read+write. Returns and sets the width of the sprite.
+   - `filename`: read-only. Returns the file name of the sprite.
+   - `colorMode`: read-only. Returns the sprite's ColorMode.
+   - `layerCount`: read-only. Returns the amount of layers in the sprite.
+
+## Methods:
+   - `loadPalette(fileName)`:
+     - fileName: The name of the palette file to load
+      returns: Nothing
+      loads a palette file.
+
+   - `crop(x, y, width, height)`:
+     - x: The left-most edge of the crop.
+     - y: The top-most edge of the crop.
+     - width: The width of the cropped area.
+     - height: The height of the cropped area.
+      returns: Nothing
+      crops the sprite to the specified dimensions.
+
+   - `saveAs(fileName, asCopy)`:
+     - fileName: String. The new name of the file
+     - asCopy: If true, the file is saved as a copy. Requires fileName to be specified.
+      returns: Nothing
+      saves the sprite.
+
+   - `resize(width, height)`:
+     - width: The new width.
+     - height: The new height.
+      returns: Nothing
+      resizes the sprite.
+
+   - `save()`:
+      returns: Nothing
+      saves the sprite.
+
+   - `commit()`:
+      returns: Nothing
+      commits the current transaction.
+
+   - `layer(layerNumber)`:
+     - layerNumber: The number of the layer, starting with zero from the bottom.
+      returns: a Layer object or null if invalid.
+      allows you to access a given layer.
+
+---
+
+# [class Layer]
+## Properties:
+   - `flags`: read-only. Returns all flags OR'd together as an int
+   - `isContinuous`: read-only. Prefer to link cels when the user copies them.
+   - `celCount`: read-only. Returns the number of cels.
+   - `isMovable`: read-only. Returns true if the layer is movable.
+   - `isVisible`: read+write. Gets/sets whether the layer is visible or not.
+   - `isTransparent`: read-only. Returns true if the layer is a non-background image layer.
+   - `isBackground`: read-only. Returns true if the layer is a background layer.
+   - `isImage`: read-only. Returns true if the layer is an image, false if it is a folder.
+   - `isEditable`: read+write. Gets/sets whether the layer is editable (unlocked) or not (locked).
+   - `name`: read+write. The name of the layer.
+
+## Methods:
+   - `cel(index)`:
+     - index: The number of the Cel
+      returns: A Cel object or null if an invalid index is passed
+      retrieves a Cel
+
+---
+
+# [class Image]
+## Properties:
+   - `format`: read-only. The PixelFormat of the image.
+   - `stride`: read-only. The number of bytes per image row.
+   - `height`: read-only. The height of the image.
+   - `width`: read-only. The width of the image.
+
+## Methods:
+   - `putPixel(x, y, color)`:
+     - x: integer
+     - y: integer
+     - color: a 32-bit color in 8888 RGBA format.
+      returns: Nothing
+      writes the color onto the image at the the given coordinate.
+
+   - `getImageData()`:
+      returns: All pixels in a Uint8Array
+      creates an array containing all of the image's pixels.
+
+   - `putImageData(data)`:
+     - data: All of the pixels in the image.
+      returns: Nothing
+      writes the given pixels onto the image. Must be the same size as the image.
+
+   - `getPNGData()`:
+      returns: The image as a Base64-encoded PNG string.
+      Encodes the image as a PNG.
+
+   - `clear(color)`:
+     - color: a 32-bit color in 8888 RGBA format.
+      returns: Nothing
+      clears the image with the specified color.
+
+   - `getPixel(x, y)`:
+     - x: integer
+     - y: integer
+      returns: a color value
+      reads a color from the given coordinate of the image.
+
+---
+
+# [class Cel]
+## Properties:
+   - `frame`: The frame number.
+   - `image`: The cel's Image.
+   - `y`: Y position.
+   - `x`: X position.
+
+## Methods:
+   - `setPosition()`:
+      returns: Nothing
+
+---
+
+# [class Palette]
+## Properties:
+   - `length`: Number of entries in the palette.
+
+## Methods:
+   - `set()`:
+      returns: Nothing
+   - `get()`:
+      returns: Nothing
+
+---
+
+# [class Document]
+## Properties:
+   - `sprite`: The document's Sprite.
+
+## Methods:
+   - `close()`:
+      returns: Nothing
+
+---
+
+# global ColorMode [class ColorMode]
+## Properties:
+   - `BITMAP`: Bitmap color mode.
+   - `INDEXED`: Indexed color mode.
+   - `GRAYSCALE`: Grayscale color mode.
+   - `RGB`: RGB color mode.
+
+---
+
+# [class pixelColor]
+## Methods:
+   - `rgba(r, g, b, a)`:
+     - r: red, 0-255.
+     - g: green, 0-255.
+     - b: blue, 0-255.
+     - a: alpha (opacity), 0-255.
+      returns: A 32-bit color in 8888 RGBA format.
+      Converts R, G, B, A values into a single 32-bit RGBA color.
+
+   - `rgbaR(color)`:
+     - color: A 32-bit color in 8888 RGBA format
+      returns: The red component of the color
+
+   - `rgbaG(color)`:
+     - color: A 32-bit color in 8888 RGBA format
+      returns: The green component of the color
+
+   - `rgbaB(color)`:
+     - color: A 32-bit color in 8888 RGBA format
+      returns: The blue component of the color
+
+   - `rgbaA(color)`:
+     - color: A 32-bit color in 8888 RGBA format
+      returns: The alpha component of the color
+
+   - `graya(gray, alpha)`:
+     - gray: The luminance of color
+     - alpha: The alpha (opacity) of the color
+      returns: The color with the given luminance/opacity
+
+   - `grayaV(color)`:
+     - color: A 32-bit color
+      returns: The luminance Value of the color
+
+   - `grayaA(color)`:
+     - color: A 32-bit color
+      returns: The alpha component of the color
+
+---
+
+# global console [class Console]
+## Methods:
+   - `log()`: Prints output to the console. Used to return information.
+   - `assert()`: Assertion.
+
+---
+
+# [class command]
+Accessed via `app.command`. Contains methods for running LibreSprite commands.
+
+## Methods:
+   - `NewFile()`: Create a new file
+   - `OpenFile()`: Open a sprite
+   - `SaveFile()`: Save the current file
+   - `SaveFileAs()`: Save file with a new name
+   - `SaveFileCopyAs()`: Save a copy of the file
+   - `CloseFile()`: Close the current file
+   - `CloseAllFiles()`: Close all files
+   - `NewFrame()`: Add a new animation frame
+   - `RemoveFrame()`: Remove the current frame
+   - `NewLayer()`: Add a new layer
+   - `RemoveLayer()`: Remove the current layer
+   - `DuplicateLayer()`: Duplicate the current layer
+   - `MergeDownLayer()`: Merge current layer down
+   - `FlattenLayers()`: Flatten all layers
+   - `NewLayerSet()`: Create a new layer group
+   - `Clear()`: Clear the selection or cel
+   - `ClearCel()`: Clear the current cel
+   - `Copy()`: Copy selection
+   - `Cut()`: Cut selection
+   - `Paste()`: Paste clipboard
+   - `PasteText()`: Insert text
+   - `CopyMerged()`: Copy merged
+   - `Undo()`: Undo last action
+   - `Redo()`: Redo last undone action
+   - `Flip()`: Flip canvas horizontal
+   - `Rotate()`: Rotate sprite
+   - `CanvasSize()`: Resize the canvas
+   - `SpriteSize()`: Resize the sprite
+   - `CropSprite()`: Crop the sprite
+   - `AutocropSprite()`: Trim the sprite
+   - `ChangePixelFormat()`: Change pixel format
+   - `ChangeColor()`: Change color
+   - `ChangeBrush()`: Change brush
+   - `SwitchColors()`: Switch foreground/background colors
+   - `MaskAll()`: Select all
+   - `DeselectMask()`: Deselect all
+   - `InvertMask()`: Invert selection
+   - `MaskContent()`: Select content
+   - `MaskByColor()`: Select by color
+   - `ModifySelection()`: Expand/contract selection
+   - `ReplaceColor()`: Replace a color
+   - `InvertColor()`: Invert colors
+   - `ColorCurve()`: Color curve adjustment
+   - `ConvolutionMatrix()`: Apply convolution matrix
+   - `Despeckle()`: Remove noise
+   - `ColorQuantization()`: Create palette from current sprite
+   - `SetPalette()`: Set palette
+   - `LoadPalette()`: Load a palette
+   - `SavePalette()`: Save the palette
+   - `PaletteSize()`: Set palette size
+   - `ExportSpriteSheet()`: Export as sprite sheet
+   - `ImportSpriteSheet()`: Import sprite sheet
+   - `PlayAnimation()`: Play animation
+   - `ShowOnionSkin()`: Toggle onion skin
+   - `ShowGrid()`: Toggle grid display
+   - `ShowPixelGrid()`: Toggle pixel grid
+   - `SnapToGrid()`: Toggle snap to grid
+   - `GridSettings()`: Configure grid
+   - `DuplicateSprite()`: Duplicate the sprite
+   - `GotoFirstFrame()`: Go to first frame
+   - `GotoLastFrame()`: Go to last frame
+   - `GotoNextFrame()`: Go to next frame
+   - `GotoPreviousFrame()`: Go to previous frame
+   - `GotoFrame()`: Go to specific frame
+   - `GotoNextLayer()`: Go to next layer
+   - `GotoPreviousLayer()`: Go to previous layer
+   - `LayerProperties()`: Edit layer properties
+   - `CelProperties()`: Edit cel properties
+   - `FrameProperties()`: Edit frame properties
+   - `SpriteProperties()`: Edit sprite properties
+   - `LinkCels()`: Link cels
+   - `UnlinkCel()`: Unlink a cel
+   - `setParameter()`: Set a command parameter (call before command execution)
+   - `clearParameters()`: Clear all command parameters
+
+---
+
+# global storage [class Storage]
+## Methods:
+   - `fetch()`: Make a network request.
+   - `get()`: Get a stored value.
+   - `set()`: Set a stored value.
+   - `save()`: Save to persistent storage.
+   - `load()`: Load from persistent storage.
+   - `unload()`: Unload from storage.
+   - `decodeBase64()`: Decode a base64 string.
+
+---
+
+# [class Dialog]
+Accessed via `app.createDialog()`.
+
+## Properties:
+   - `canClose`: write only. Determines if the user can close the dialog window.
+   - `title`: read+write. Sets the title of the dialog window.
+
+## Methods:
+   - `addLabel(text)`: Add a text label.
+   - `addButton(text, id)`: Add a clickable button.
+   - `addEntry(label, id)`: Add a text entry field.
+   - `addIntEntry(label, id, min, max)`: Add an integer entry field.
+   - `addDropDown(label, id)`: Add a dropdown.
+   - `addPaletteListBox()`: Add a palette list box.
+   - `addBreak()`: Add a line break.
+   - `close()`: Close the dialog.
+   - `get(id)`: Get a widget value by id.
