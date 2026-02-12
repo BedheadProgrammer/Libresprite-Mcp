@@ -1,274 +1,189 @@
 # LibreSprite MCP Server
 
-An MCP (Model Context Protocol) server that lets AI assistants (GitHub Copilot, Claude Code, Cursor, Claude Desktop) generate and edit pixel-art sprites by driving [LibreSprite](https://github.com/LibreSprite/LibreSprite) via its JavaScript scripting API.
+An MCP server that lets AI assistants generate pixel-art sprites by driving [LibreSprite](https://github.com/LibreSprite/LibreSprite) via its JavaScript scripting API. Works with GitHub Copilot (VS Code), Claude Code, Cursor, and Claude Desktop.
 
----
+## Two Modes
 
-## How It Works
+| Mode | How it works | Use when… |
+|------|-------------|----------|
+| **docker** (headless) | Runs LibreSprite inside a Docker container via `--batch --script`. No UI needed. | You want the AI to work solo — no LibreSprite window required. |
+| **relay** (interactive) | Container runs a Flask HTTP bridge. LibreSprite on your desktop polls it via `remote/mcp.js`. | You have LibreSprite open and want the AI to drive it interactively. |
 
-The server supports two operation modes:
-
-### Relay Mode (recommended — default)
-
-The MCP server runs natively on your machine and communicates with a running LibreSprite instance through a local HTTP relay. A remote script (`remote/mcp.js`) inside LibreSprite polls the relay for scripts to execute.
-
-```
-AI Client (Copilot/Claude) → MCP Server → HTTP Relay → LibreSprite (mcp.js)
-```
-
-### Docker Mode
-
-LibreSprite runs headless inside a Docker container with a virtual display (Xvfb). Scripts are executed via `libresprite --batch --script`. Best for CI or automated sprite generation.
-
-```
-AI Client → MCP Server (Docker) → LibreSprite (headless) → output/
-```
-
----
-
-## Quick Start — Relay Mode (Recommended)
+## Setup (Clone → Ready)
 
 ### Prerequisites
 
-- Python 3.11+
-- [LibreSprite](https://github.com/LibreSprite/LibreSprite) installed
-- An MCP-compatible client (VS Code with GitHub Copilot, Claude Code, Cursor, Claude Desktop)
+- [Docker Desktop](https://docs.docker.com/get-docker/)
+- An MCP-compatible AI client (VS Code w/ Copilot, Claude Code, Cursor, Claude Desktop)
 
-### 1. Install dependencies
+### 1. Clone & Build
 
 ```bash
-cd libresprite-mcp
-pip install "mcp[cli]" flask
+git clone <this-repo>
+cd Libresprite-Mcp/libresprite-mcp
+docker build -t libresprite-mcp .
 ```
 
-### 2. Set up the LibreSprite remote script
+### 2. Configure Your AI Client
 
-Copy `remote/mcp.js` into your LibreSprite scripts folder:
+#### VS Code (GitHub Copilot)
 
-- **Linux**: `~/.config/libresprite/scripts/`
-- **macOS**: `~/Library/Application Support/LibreSprite/scripts/`
-- **Windows**: `%APPDATA%\LibreSprite\scripts\`
+The repo includes `.vscode/mcp.json` with **both** servers pre-configured — it works out of the box.
 
-### 3. Configure your MCP client
-
-#### VS Code with GitHub Copilot
-
-Add to your VS Code `settings.json` (or workspace `.vscode/settings.json`):
+To set it up manually, create `.vscode/mcp.json`:
 
 ```json
 {
-    "mcp": {
-        "servers": {
-            "libresprite": {
-                "type": "stdio",
-                "command": "python",
-                "args": ["/absolute/path/to/libresprite-mcp/server.py"]
-            }
-        }
+  "servers": {
+    "libresprite-docker": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "${workspaceFolder}/libresprite-mcp/output:/app/output",
+        "libresprite-mcp"
+      ]
+    },
+    "libresprite-relay": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-p", "64823:64823",
+        "-e", "LIBRESPRITE_MODE=relay",
+        "-e", "LIBRESPRITE_RELAY_HOST=0.0.0.0",
+        "-v", "${workspaceFolder}/libresprite-mcp/output:/app/output",
+        "libresprite-mcp"
+      ]
     }
+  }
 }
 ```
 
 #### Claude Code
 
 ```bash
-claude mcp add libresprite -- python /absolute/path/to/libresprite-mcp/server.py
+# Docker (headless) mode
+claude mcp add libresprite-docker -- docker run --rm -i -v "$(pwd)/libresprite-mcp/output:/app/output" libresprite-mcp
+
+# Relay (interactive) mode
+claude mcp add libresprite-relay -- docker run --rm -i -p 64823:64823 -e LIBRESPRITE_MODE=relay -e LIBRESPRITE_RELAY_HOST=0.0.0.0 -v "$(pwd)/libresprite-mcp/output:/app/output" libresprite-mcp
 ```
 
 #### Claude Desktop / Cursor
 
-Edit your MCP config file (`claude_desktop_config.json` or `.cursor/mcp.json`):
+Add to your MCP config (`claude_desktop_config.json` or `.cursor/mcp.json`):
 
 ```json
 {
-    "mcpServers": {
-        "libresprite": {
-            "type": "stdio",
-            "command": "python",
-            "args": ["/absolute/path/to/libresprite-mcp/server.py"]
-        }
+  "mcpServers": {
+    "libresprite-docker": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "/absolute/path/to/libresprite-mcp/output:/app/output",
+        "libresprite-mcp"
+      ]
+    },
+    "libresprite-relay": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-p", "64823:64823",
+        "-e", "LIBRESPRITE_MODE=relay",
+        "-e", "LIBRESPRITE_RELAY_HOST=0.0.0.0",
+        "-v", "/absolute/path/to/libresprite-mcp/output:/app/output",
+        "libresprite-mcp"
+      ]
     }
+  }
 }
 ```
 
-### 4. Connect
+### 3. Use It
 
-1. Open LibreSprite
-2. Run the `mcp.js` script from the Scripts menu
+**Docker mode** — just ask:
+
+> "Create a 64x64 Pyromancer with a fireball"
+
+The AI calls tools on the `libresprite-docker` server, renders headlessly, and outputs a PNG to `libresprite-mcp/output/`.
+
+**Relay mode** — open LibreSprite first:
+
+1. Open LibreSprite on your desktop
+2. Run `File → Scripts → remote/mcp.js` (or paste the script into the console)
 3. Click **Connect** in the dialog that appears
-4. Start talking to your AI about sprites!
+4. Ask the AI to create a sprite — it will draw directly in your LibreSprite window
 
 ---
 
-## Quick Start — Docker Mode
+## MCP Tools
 
-### Prerequisites
+### Both Modes (docker + relay)
 
-- [Docker](https://docs.docker.com/get-docker/) (and Docker Compose)
+| Tool | Description |
+|------|-------------|
+| `draw_image(width, height, pixel_colors)` | **Primary tool.** Draw a complete sprite by providing every pixel colour as a flat JSON array of hex strings. |
+| `create_sprite(width, height)` | Create a new empty sprite with the given dimensions. |
+| `set_pixels(pixels)` | Set a sparse set of individual pixels by coordinate and hex colour. |
+| `draw_rect(x, y, width, height, color)` | Draw a filled rectangle on the active image. |
+| `fill_sprite(color)` | Fill the entire active image with a single colour. |
+| `create_pixel_art(width, height, pixel_data, palette?)` | Create sprites from a text-based pixel map. |
+| `run_script(script)` | Execute JavaScript in LibreSprite. **Advanced** — use the tools above for standard tasks. |
+| `screenshot()` | Capture the current sprite as an inline image for visual inspection. |
+| `get_sprite_info()` | Get info about the active sprite (width, height, layers, etc.). In relay mode reads from live LibreSprite; in docker mode reads from the latest generated PNG. |
+| `get_pixel_data(x, y, width?, height?)` | Read pixel colour data from the active image. In relay mode reads from live LibreSprite; in docker mode reads from the latest generated PNG. |
 
-### Build
+### Docker Only
 
-```bash
-cd libresprite-mcp
-docker build -t libresprite-mcp .
-```
+| Tool | Description |
+|------|-------------|
+| `list_sprites()` | List all generated sprite files in the output directory. |
 
-### Run (standalone test)
-
-```bash
-mkdir -p output
-docker run --rm -i -v "$(pwd)/output:/app/output" libresprite-mcp
-```
-
-### Connect to an MCP Client (Docker mode)
-
-```json
-{
-    "mcpServers": {
-        "libresprite": {
-            "command": "docker",
-            "args": [
-                "run", "--rm", "-i",
-                "-v", "/absolute/path/to/output:/app/output",
-                "libresprite-mcp"
-            ]
-        }
-    }
-}
-```
-
----
-
-## Quick Start — Docker Relay Mode
-
-You can also run the MCP server inside a Docker container while communicating
-with a LibreSprite instance running on your host machine.  This combines the
-convenience of a containerised server with live interaction in your real
-LibreSprite session.
-
-```
-AI Client (Copilot/Claude) → MCP Server (Docker) → HTTP Relay (port 64823) → LibreSprite (host)
-```
-
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) (and Docker Compose)
-- [LibreSprite](https://github.com/LibreSprite/LibreSprite) installed on the host
-
-### Build
-
-```bash
-cd libresprite-mcp
-docker build -t libresprite-mcp .
-```
-
-### Run
-
-```bash
-docker run --rm -i -p 64823:64823 \
-    -e LIBRESPRITE_MODE=relay \
-    -e LIBRESPRITE_RELAY_HOST=0.0.0.0 \
-    libresprite-mcp
-```
-
-Or using Docker Compose:
-
-```bash
-docker compose run --service-ports libresprite-mcp-relay
-```
-
-### Connect LibreSprite
-
-1. Copy `remote/mcp.js` into your LibreSprite scripts folder (see paths under [Relay Mode setup](#2-set-up-the-libresprite-remote-script)).
-2. Open LibreSprite on the host.
-3. Run the `mcp.js` script from the Scripts menu and click **Connect**.
-
-### Connect to an MCP Client (Docker relay mode)
-
-```json
-{
-    "mcpServers": {
-        "libresprite": {
-            "command": "docker",
-            "args": [
-                "run", "--rm", "-i",
-                "-p", "64823:64823",
-                "-e", "LIBRESPRITE_MODE=relay",
-                "-e", "LIBRESPRITE_RELAY_HOST=0.0.0.0",
-                "libresprite-mcp"
-            ]
-        }
-    }
-}
-```
-
----
-
-## Available MCP Tools
-
-| Tool | Description | Modes |
-|------|-------------|-------|
-| `draw_image(width, height, pixel_colors)` | **Primary tool.** Draw a complete sprite by providing every pixel colour as a flat JSON array of hex strings. A 64×64 image ≈ 10 k tokens. | relay, docker |
-| `create_sprite(width, height)` | Create a new empty sprite with the given dimensions. | relay, docker |
-| `set_pixels(pixels)` | Set a sparse set of individual pixels by coordinate and hex colour (JSON array). | relay, docker |
-| `draw_rect(x, y, width, height, color)` | Draw a filled rectangle on the active image. | relay, docker |
-| `fill_sprite(color)` | Fill the entire active image with a single colour. | relay, docker |
-| `create_pixel_art(width, height, pixel_data, palette?)` | Create sprites from a simple text-based pixel map without writing code. | relay, docker |
-| `run_script(script)` | Execute JavaScript in LibreSprite. **Advanced** — use the tools above for standard tasks. Read the API docs first via the `docs://reference` and `docs://examples` resources. | relay, docker |
-| `list_sprites()` | List all generated sprite files in the output directory. | docker |
-| `get_sprite_info()` | Get info about the active sprite (width, height, layers, etc.). | relay |
-| `get_pixel_data(x, y, width?, height?)` | Read pixel colour data from the active image. | relay |
-
-## Available MCP Resources
+## MCP Resources
 
 | Resource | Description |
 |----------|-------------|
-| `docs://reference` | LibreSprite JavaScript scripting API reference |
-| `docs://examples` | Example scripts demonstrating common sprite operations |
-
-## Available MCP Prompts
-
-| Prompt | Description |
-|--------|-------------|
-| `libresprite(prompt)` | Prompt template that conditions the AI for LibreSprite scripting with proper context |
+| `docs://reference` | LibreSprite JavaScript API reference |
+| `docs://examples` | Example scripts for common sprite operations |
 
 ---
 
-## Environment Variables
+## Troubleshooting
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LIBRESPRITE_MODE` | `relay` | Operation mode: `relay` or `docker` |
-| `LIBRESPRITE_RELAY_HOST` | `localhost` | Relay server bind address |
-| `LIBRESPRITE_RELAY_PORT` | `64823` | Relay server port |
-| `LIBRESPRITE_OUTPUT_DIR` | `/app/output` | Output directory (docker mode) |
-| `LIBRESPRITE_BIN` | `/usr/local/bin/libresprite` | LibreSprite binary path (docker mode) |
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| All tools timeout after 60s | Relay mode active but LibreSprite not connected | Open LibreSprite, run `remote/mcp.js`, click Connect |
+| `list_sprites` not visible | Connected to the relay server | Use `libresprite-docker` server instead |
+| Docker image not found | Image not built yet | Run `docker build -t libresprite-mcp ./libresprite-mcp` |
 
 ---
 
-## Critique of the Original Plan
+## Scripting Reference
 
-The original `IMPLEMENTATION_PLAN.md` had several issues fixed in this implementation:
+Scripts are **JavaScript (ES5)** — not Lua. Key rules:
 
-| # | Issue | Severity | Fix Applied |
-|---|-------|----------|-------------|
-| 1 | **Used Lua scripting** — LibreSprite's scripting API is JavaScript, not Lua. Scripts written in Lua would not execute. | **Critical** | Switched entirely to JavaScript scripting API. |
-| 2 | **No API documentation** — The AI had no reference material and would hallucinate API calls. | **Critical** | Added MCP resources with full API reference and examples. |
-| 3 | **No MCP prompts** — The AI wasn't conditioned to use the tools correctly. | **High** | Added a prompt template that guides the AI. |
-| 4 | **Docker-only** — Required Docker for all usage, limiting compatibility with VS Code Copilot and Claude Code. | **High** | Added relay mode for native usage without Docker. |
-| 5 | **No live interaction** — Each script started a new LibreSprite process; couldn't interact with user's canvas. | **High** | Added relay server + remote script for live interaction. |
-| 6 | **Lua code injection** — The "security header" only set a variable that user code could overwrite. | **Medium** | Docker mode wraps scripts minimally; relay mode uses LibreSprite's sandboxed JS engine. |
-| 7 | **AppImage requires FUSE** — Docker containers don't provide FUSE. | **Medium** | Dockerfile extracts AppImage with `--appimage-extract`. |
-| 8 | **Missing `mcp[cli]` extras** — `pip install mcp` doesn't install transport extras. | **Medium** | Changed to `pip install "mcp[cli]"`. |
-| 9 | **Limited tool set** — Only had `generate_sprite`. | **Medium** | Added `run_script`, `get_sprite_info`, `get_pixel_data`, `create_pixel_art`, `list_sprites`. |
-| 10 | **No `.dockerignore` / `.gitignore`** — Build context included unnecessary files. | **Low** | Added both files. |
+- Use `var` (no `let`/`const`)
+- Colors: `app.pixelColor.rgba(r, g, b, a)` — values 0–255
+- Drawing: `app.activeImage.putPixel(x, y, color)`
+- Canvas: `app.activeImage.width` / `.height`
+- The server auto-saves output — do not call `saveAs()`
+
+See `AGENT_GUIDE.md` for the full template that AI agents use.
 
 ---
 
-## Running Tests
+## Project Structure
 
-```bash
-cd libresprite-mcp
-pip install "mcp[cli]" flask
-python -m unittest test_server -v
+```
+.vscode/mcp.json          ← MCP client config (two servers: docker + relay)
+AGENT_GUIDE.md             ← Instructions for AI agents
+libresprite-mcp/
+  server.py                ← MCP server (mode-aware tool registration)
+  Dockerfile               ← Builds the headless LibreSprite image
+  docker-compose.yml       ← Optional compose config (both services)
+  resources/
+    reference.txt          ← JS API docs (served as MCP resource)
+    examples.txt           ← Example scripts (served as MCP resource)
+  remote/
+    mcp.js                 ← LibreSprite relay script (for relay mode)
+  output/                  ← Generated sprites land here
 ```
