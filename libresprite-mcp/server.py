@@ -358,19 +358,27 @@ def libresprite(prompt: str) -> str:
     """
     return (
         "LibreSprite is a program for creating and editing pixel art and "
-        "animations using JavaScript.\n\n"
-        "Before proceeding, please ensure you are well versed with the "
-        "documentation and examples provided in the resources "
-        "`docs://reference` and `docs://examples`.\n\n"
-        "You can use the `run_script` tool to execute JavaScript scripts "
-        "in the context of LibreSprite.\n\n"
-        "IMPORTANT NOTES:\n"
-        "- LibreSprite uses a JavaScript scripting API (NOT Lua).\n"
-        "- Use `app.pixelColor.rgba(r, g, b, a)` to create colors.\n"
-        "- Use `app.activeImage.putPixel(x, y, color)` to draw pixels.\n"
-        "- Use `console.log(...)` to output information.\n"
-        "- The active image is accessed via `app.activeImage`.\n"
-        "- The active sprite is accessed via `app.activeSprite`.\n\n"
+        "animations.\n\n"
+        "PREFERRED WORKFLOW — use the declarative tools to build pixel art "
+        "directly.  You specify the pixels; the server draws them:\n"
+        "1. `draw_image(width, height, pixel_colors)` — **primary tool**. "
+        "Draw a complete sprite by providing every pixel colour as a flat "
+        "JSON array of hex strings in row-major order.  A 64×64 image is "
+        "only ~10 k tokens.\n"
+        "2. `create_sprite(width, height)` — create a blank sprite for "
+        "incremental editing.\n"
+        "3. `set_pixels(pixels)` — touch up individual pixels by "
+        "coordinate.\n"
+        "4. `draw_rect(x, y, width, height, color)` — draw a filled "
+        "rectangle.\n"
+        "5. `fill_sprite(color)` — fill the entire image with a colour.\n"
+        "6. `create_pixel_art(width, height, pixel_data, palette?)` — "
+        "create sprites from a text-based pixel map.\n\n"
+        "Only fall back to `run_script` for advanced operations that the "
+        "declarative tools cannot handle (e.g. animation frames, layers, "
+        "palette manipulation, or complex procedural generation).  If you "
+        "do use `run_script`, read `docs://reference` and "
+        "`docs://examples` first.\n\n"
         f"Here's what you need to do:\n\n{prompt}"
     )
 
@@ -381,6 +389,12 @@ def libresprite(prompt: str) -> str:
 @mcp.tool()
 def run_script(script: str) -> str:
     """Execute a JavaScript script inside LibreSprite.
+
+    **Advanced tool** — prefer the declarative tools (``create_sprite``,
+    ``set_pixels``, ``draw_rect``, ``fill_sprite``, ``create_pixel_art``)
+    for standard pixel-art tasks.  Use ``run_script`` only when you need
+    capabilities not covered by those tools (e.g. animation frames, layers,
+    palette manipulation, or complex procedural generation).
 
     IMPORTANT: Read the resources `docs://reference` and `docs://examples`
     first to understand the available API.
@@ -587,6 +601,265 @@ def get_pixel_data(x: int, y: int, width: int = 1, height: int = 1) -> str:
         "}\n"
     )
     return run_script(script)
+
+
+# -- Declarative pixel-art tools -------------------------------------------
+
+
+def _parse_hex_color(hex_str: str) -> tuple[int, int, int, int] | str:
+    """Parse a hex colour string into (r, g, b, a).
+
+    Accepts ``#RRGGBB``, ``RRGGBB``, ``#RRGGBBAA``, or ``RRGGBBAA``.
+    Returns a tuple on success or an error string on failure.
+    """
+    h = hex_str.strip().lstrip("#")
+    if len(h) not in (6, 8) or not all(c in "0123456789abcdefABCDEF" for c in h):
+        return f"Invalid hex colour '{hex_str}'. Use RRGGBB or RRGGBBAA format."
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    a = int(h[6:8], 16) if len(h) == 8 else 255
+    return (r, g, b, a)
+
+
+@mcp.tool()
+def create_sprite(width: int, height: int) -> str:
+    """Create a new empty sprite with the given dimensions.
+
+    Call this before ``set_pixels``, ``draw_rect``, ``fill_sprite``, or
+    ``create_pixel_art`` when no sprite is open yet.
+
+    Args:
+        width:  Sprite width in pixels (1–256).
+        height: Sprite height in pixels (1–256).
+    """
+    if width < 1 or width > 256 or height < 1 or height > 256:
+        return "Error: width and height must be between 1 and 256."
+
+    js_code = (
+        f"app.command.NewFile();\n"
+        f"var s = app.activeSprite;\n"
+        f"if (s) {{\n"
+        f"    s.width = {width};\n"
+        f"    s.height = {height};\n"
+        f'    console.log("Created sprite: {width}x{height}");\n'
+        f"}} else {{\n"
+        f'    console.log("Error: could not create sprite.");\n'
+        f"}}\n"
+    )
+    return run_script(js_code)
+
+
+@mcp.tool()
+def set_pixels(pixels: str) -> str:
+    """Set a sparse set of individual pixels on the active image.
+
+    Best for touching up or editing a small number of specific pixels.
+    For drawing a complete image, prefer ``draw_image`` instead.
+
+    Args:
+        pixels: A JSON array of pixel objects.  Each object must have:
+                ``x`` (int), ``y`` (int), and ``color`` (hex string RRGGBB or
+                RRGGBBAA, with or without '#').
+                Example::
+
+                    [
+                      {"x": 0, "y": 0, "color": "#ff0000"},
+                      {"x": 1, "y": 0, "color": "#00ff00"},
+                      {"x": 2, "y": 0, "color": "0000ff"}
+                    ]
+    """
+    try:
+        data = json.loads(pixels)
+    except (json.JSONDecodeError, TypeError) as exc:
+        return f"Error: pixels must be a valid JSON array. ({exc})"
+
+    if not isinstance(data, list) or len(data) == 0:
+        return "Error: pixels must be a non-empty JSON array."
+
+    js_lines: list[str] = [
+        "var col = app.pixelColor;",
+        "var img = app.activeImage;",
+        "if (!img) { console.log('Error: no active image. "
+        "Use create_sprite first.'); }",
+        "else {",
+    ]
+
+    for i, px in enumerate(data):
+        if not isinstance(px, dict):
+            return f"Error: pixel at index {i} is not an object."
+        if "x" not in px or "y" not in px or "color" not in px:
+            return f"Error: pixel at index {i} must have 'x', 'y', and 'color'."
+        parsed = _parse_hex_color(str(px["color"]))
+        if isinstance(parsed, str):
+            return f"Error at pixel index {i}: {parsed}"
+        r, g, b, a = parsed
+        js_lines.append(
+            f"    img.putPixel({int(px['x'])}, {int(px['y'])}, "
+            f"col.rgba({r}, {g}, {b}, {a}));"
+        )
+
+    count = len(data)
+    js_lines.append(f'    console.log("Set {count} pixel(s).");')
+    js_lines.append("}")
+
+    return run_script("\n".join(js_lines))
+
+
+@mcp.tool()
+def draw_rect(
+    x: int, y: int, width: int, height: int, color: str
+) -> str:
+    """Draw a filled rectangle on the active image.
+
+    Args:
+        x:      X coordinate of the top-left corner.
+        y:      Y coordinate of the top-left corner.
+        width:  Rectangle width in pixels.
+        height: Rectangle height in pixels.
+        color:  Hex colour string (RRGGBB or RRGGBBAA, with or without '#').
+    """
+    if width < 1 or height < 1:
+        return "Error: width and height must be at least 1."
+
+    parsed = _parse_hex_color(color)
+    if isinstance(parsed, str):
+        return parsed
+    r, g, b, a = parsed
+
+    js_code = (
+        "var col = app.pixelColor;\n"
+        "var img = app.activeImage;\n"
+        "if (!img) { console.log('Error: no active image. "
+        "Use create_sprite first.'); }\n"
+        "else {\n"
+        f"    var c = col.rgba({r}, {g}, {b}, {a});\n"
+        f"    for (var py = {y}; py < {y + height}; py++) {{\n"
+        f"        for (var px = {x}; px < {x + width}; px++) {{\n"
+        "            img.putPixel(px, py, c);\n"
+        "        }\n"
+        "    }\n"
+        f'    console.log("Drew rectangle {width}x{height} at ({x},{y})");\n'
+        "}\n"
+    )
+    return run_script(js_code)
+
+
+@mcp.tool()
+def fill_sprite(color: str) -> str:
+    """Fill the entire active image with a single colour.
+
+    Args:
+        color: Hex colour string (RRGGBB or RRGGBBAA, with or without '#').
+               Use ``00000000`` for fully transparent.
+    """
+    parsed = _parse_hex_color(color)
+    if isinstance(parsed, str):
+        return parsed
+    r, g, b, a = parsed
+
+    js_code = (
+        "var col = app.pixelColor;\n"
+        "var img = app.activeImage;\n"
+        "if (!img) { console.log('Error: no active image. "
+        "Use create_sprite first.'); }\n"
+        "else {\n"
+        f"    img.clear(col.rgba({r}, {g}, {b}, {a}));\n"
+        f'    console.log("Filled sprite with #{color.strip().lstrip("#")}");\n'
+        "}\n"
+    )
+    return run_script(js_code)
+
+
+@mcp.tool()
+def draw_image(width: int, height: int, pixel_colors: str) -> str:
+    """Draw a complete sprite image by specifying every pixel colour.
+
+    This is the **primary** tool for creating pixel art.  The agent provides
+    the full pixel grid as a flat JSON array of hex colour strings in
+    row-major order (left-to-right, top-to-bottom).  The tool creates a new
+    sprite of the given size and fills it with the supplied colours.
+
+    A 64x64 sprite is 4096 entries — roughly 10k tokens — well within a
+    standard context window.
+
+    Args:
+        width:        Sprite width in pixels (1–256).
+        height:       Sprite height in pixels (1–256).
+        pixel_colors: A JSON array of hex colour strings, one per pixel, in
+                      row-major order.  Length must equal ``width × height``.
+                      Use ``"."`` for transparent pixels.
+                      Example for a 3×2 image (3 wide, 2 tall)::
+
+                          ["ff0000","00ff00","0000ff",
+                           "ffff00","ff00ff","00ffff"]
+    """
+    if width < 1 or width > 256 or height < 1 or height > 256:
+        return "Error: width and height must be between 1 and 256."
+
+    try:
+        colors = json.loads(pixel_colors)
+    except (json.JSONDecodeError, TypeError) as exc:
+        return f"Error: pixel_colors must be a valid JSON array. ({exc})"
+
+    if not isinstance(colors, list):
+        return "Error: pixel_colors must be a JSON array."
+
+    expected = width * height
+    if len(colors) != expected:
+        return (
+            f"Error: expected {expected} colours ({width}×{height}) "
+            f"but got {len(colors)}."
+        )
+
+    # Pre-parse every colour before generating JavaScript.
+    parsed_colors: list[tuple[int, int, int, int] | None] = []
+    for i, c in enumerate(colors):
+        cs = str(c).strip()
+        if cs == ".":
+            parsed_colors.append(None)  # transparent
+            continue
+        parsed = _parse_hex_color(cs)
+        if isinstance(parsed, str):
+            return f"Error at pixel index {i}: {parsed}"
+        parsed_colors.append(parsed)
+
+    # Build JavaScript using putImageData for efficiency.  The image data is
+    # a Uint8Array of RGBA bytes.
+    rgba_values: list[str] = []
+    for pc in parsed_colors:
+        if pc is None:
+            rgba_values.extend(("0", "0", "0", "0"))
+        else:
+            r, g, b, a = pc
+            rgba_values.extend((str(r), str(g), str(b), str(a)))
+
+    # Emit the array in chunks to keep individual lines manageable.
+    chunk_size = 256  # values per line (64 pixels worth of RGBA)
+    array_lines: list[str] = []
+    for start in range(0, len(rgba_values), chunk_size):
+        chunk = ",".join(rgba_values[start : start + chunk_size])
+        array_lines.append(f"    {chunk}")
+
+    array_body = ",\n".join(array_lines)
+
+    js_code = (
+        "app.command.NewFile();\n"
+        "var s = app.activeSprite;\n"
+        "if (!s) { console.log('Error: could not create sprite.'); }\n"
+        "else {\n"
+        f"    s.width = {width};\n"
+        f"    s.height = {height};\n"
+        "    var img = app.activeImage;\n"
+        "    var data = new Uint8Array([\n"
+        f"{array_body}\n"
+        "    ]);\n"
+        "    img.putImageData(data);\n"
+        f'    console.log("Drew image: {width}x{height} '
+        f'({expected} pixels)");\n'
+        "}\n"
+    )
+    return run_script(js_code)
 
 
 # ---------------------------------------------------------------------------
