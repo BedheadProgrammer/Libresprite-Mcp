@@ -37,8 +37,9 @@ RUN pip install --no-cache-dir "mcp[cli]"
 
 # 4. Setup Working Directory and output directory
 WORKDIR /app
-RUN mkdir -p /app/output /app/scripts
+RUN mkdir -p /app/output
 COPY server.py .
+COPY resources/ resources/
 
 # 5. Create a non-root user (Security Best Practice)
 RUN useradd -m spriteuser \
@@ -46,8 +47,9 @@ RUN useradd -m spriteuser \
 
 USER spriteuser
 
-# 6. Env vars to force headless execution
+# 6. Env vars to force headless execution and docker mode
 ENV DISPLAY=:99
+ENV LIBRESPRITE_MODE=docker
 
 # 7. Start command: Run Xvfb in background, then the Python Server
 CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & while ! test -e /tmp/.X99-lock; do sleep 0.1; done && python server.py"]

@@ -1,36 +1,110 @@
 # LibreSprite MCP Server
 
-An MCP (Model Context Protocol) server that lets an AI assistant generate pixel-art sprites by driving [LibreSprite](https://github.com/LibreSprite/LibreSprite) inside a sandboxed Docker container.
-
-**Flow:** User prompt → AI writes Lua script → MCP server executes it in LibreSprite → sprite saved to `output/`
+An MCP (Model Context Protocol) server that lets AI assistants (GitHub Copilot, Claude Code, Cursor, Claude Desktop) generate and edit pixel-art sprites by driving [LibreSprite](https://github.com/LibreSprite/LibreSprite) via its JavaScript scripting API.
 
 ---
 
-## Critique of the Original Plan
+## How It Works
 
-The original `IMPLEMENTATION_PLAN.md` had several issues that are fixed in this implementation:
+The server supports two operation modes:
 
-| # | Issue | Severity | Fix Applied |
-|---|-------|----------|-------------|
-| 1 | **Lua code injection** – user-supplied Lua was interpolated directly into a script with no sanitization. The "security header" only set a variable that user code could trivially overwrite, and dangerous functions like `os.execute()`, `io.popen()` remained available. | **Critical** | Added regex-based pre-validation AND runtime sandbox that nils out dangerous globals (`os.execute`, `io.open`, `require`, `debug`, etc.) before user code runs. |
-| 2 | **AppImage requires FUSE** – Docker containers do not provide FUSE by default. Running the AppImage directly would fail with a cryptic error. | **High** | The Dockerfile now extracts the AppImage with `--appimage-extract` and symlinks the resulting `AppRun` binary. |
-| 3 | **Missing `mcp[cli]` extras** – `pip install mcp` does not install the CLI/transport extras needed by `FastMCP.run(transport="stdio")`. | **Medium** | Changed to `pip install "mcp[cli]"`. |
-| 4 | **No explicit transport** – `mcp.run()` without arguments may default to the wrong transport. | **Medium** | Server now calls `mcp.run(transport="stdio")`. |
-| 5 | **Missing output directory** – Dockerfile never created `/app/output`; the bind-mount would shadow it anyway, but without a mount the server would crash. | **Low** | Added `mkdir -p /app/output` in Dockerfile. |
-| 6 | **No input validation** – Empty `lua_code` would produce an empty script and a confusing LibreSprite error. | **Low** | Added empty-input check. |
-| 7 | **Single tool only** – The original plan only exposed `generate_sprite`. | **Low** | Added `list_sprites` (list output files) and `create_pixel_art` (text-based pixel map convenience tool). |
-| 8 | **No `.dockerignore` / `.gitignore`** – Build context would include unnecessary files; generated sprites would be committed. | **Low** | Added both files. |
-| 9 | **Bare `CMD` string** – `CMD Xvfb ... & python server.py` uses shell form which doesn't handle signals correctly. | **Low** | Changed to exec form with explicit `sh -c` and added a `sleep 1` to let Xvfb initialize. |
-| 10 | **Missing system libraries** – LibreSprite depends on several image/font libraries not listed in the original Dockerfile. | **Medium** | Added `libgif7`, `libfreetype6`, `libfontconfig1`, `libjpeg62-turbo`, `libpng16-16`, `libtiff6`, `libwebp7`, and X11 libraries. |
+### Relay Mode (recommended — default)
+
+The MCP server runs natively on your machine and communicates with a running LibreSprite instance through a local HTTP relay. A remote script (`remote/mcp.js`) inside LibreSprite polls the relay for scripts to execute.
+
+```
+AI Client (Copilot/Claude) → MCP Server → HTTP Relay → LibreSprite (mcp.js)
+```
+
+### Docker Mode
+
+LibreSprite runs headless inside a Docker container with a virtual display (Xvfb). Scripts are executed via `libresprite --batch --script`. Best for CI or automated sprite generation.
+
+```
+AI Client → MCP Server (Docker) → LibreSprite (headless) → output/
+```
 
 ---
 
-## Quick Start
+## Quick Start — Relay Mode (Recommended)
+
+### Prerequisites
+
+- Python 3.11+
+- [LibreSprite](https://github.com/LibreSprite/LibreSprite) installed
+- An MCP-compatible client (VS Code with GitHub Copilot, Claude Code, Cursor, Claude Desktop)
+
+### 1. Install dependencies
+
+```bash
+cd libresprite-mcp
+pip install "mcp[cli]" flask
+```
+
+### 2. Set up the LibreSprite remote script
+
+Copy `remote/mcp.js` into your LibreSprite scripts folder:
+
+- **Linux**: `~/.config/libresprite/scripts/`
+- **macOS**: `~/Library/Application Support/LibreSprite/scripts/`
+- **Windows**: `%APPDATA%\LibreSprite\scripts\`
+
+### 3. Configure your MCP client
+
+#### VS Code with GitHub Copilot
+
+Add to your VS Code `settings.json` (or workspace `.vscode/settings.json`):
+
+```json
+{
+    "mcp": {
+        "servers": {
+            "libresprite": {
+                "type": "stdio",
+                "command": "python",
+                "args": ["/absolute/path/to/libresprite-mcp/server.py"]
+            }
+        }
+    }
+}
+```
+
+#### Claude Code
+
+```bash
+claude mcp add libresprite -- python /absolute/path/to/libresprite-mcp/server.py
+```
+
+#### Claude Desktop / Cursor
+
+Edit your MCP config file (`claude_desktop_config.json` or `.cursor/mcp.json`):
+
+```json
+{
+    "mcpServers": {
+        "libresprite": {
+            "type": "stdio",
+            "command": "python",
+            "args": ["/absolute/path/to/libresprite-mcp/server.py"]
+        }
+    }
+}
+```
+
+### 4. Connect
+
+1. Open LibreSprite
+2. Run the `mcp.js` script from the Scripts menu
+3. Click **Connect** in the dialog that appears
+4. Start talking to your AI about sprites!
+
+---
+
+## Quick Start — Docker Mode
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) (and Docker Compose)
-- An MCP-compatible client (e.g., Claude Desktop, Cursor)
 
 ### Build
 
@@ -46,64 +120,85 @@ mkdir -p output
 docker run --rm -i -v "$(pwd)/output:/app/output" libresprite-mcp
 ```
 
-The server starts and waits for MCP JSON-RPC messages on stdin/stdout.
-
-### Connect to an MCP Client
-
-Add this to your MCP client configuration (e.g., `claude_desktop_config.json`):
+### Connect to an MCP Client (Docker mode)
 
 ```json
 {
-  "mcpServers": {
-    "libresprite": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "-v", "/absolute/path/to/output:/app/output",
-        "libresprite-mcp"
-      ]
+    "mcpServers": {
+        "libresprite": {
+            "command": "docker",
+            "args": [
+                "run", "--rm", "-i",
+                "-v", "/absolute/path/to/output:/app/output",
+                "libresprite-mcp"
+            ]
+        }
     }
-  }
 }
 ```
 
-### Using Docker Compose
+---
+
+## Available MCP Tools
+
+| Tool | Description | Modes |
+|------|-------------|-------|
+| `run_script(script)` | Execute JavaScript in LibreSprite. Read the API docs first via the `docs://reference` and `docs://examples` resources. | relay, docker |
+| `create_pixel_art(width, height, pixel_data, palette?)` | Create sprites from a simple text-based pixel map without writing code. | relay, docker |
+| `list_sprites()` | List all generated sprite files in the output directory. | docker |
+| `get_sprite_info()` | Get info about the active sprite (width, height, layers, etc.). | relay |
+| `get_pixel_data(x, y, width?, height?)` | Read pixel colour data from the active image. | relay |
+
+## Available MCP Resources
+
+| Resource | Description |
+|----------|-------------|
+| `docs://reference` | LibreSprite JavaScript scripting API reference |
+| `docs://examples` | Example scripts demonstrating common sprite operations |
+
+## Available MCP Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `libresprite(prompt)` | Prompt template that conditions the AI for LibreSprite scripting with proper context |
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LIBRESPRITE_MODE` | `relay` | Operation mode: `relay` or `docker` |
+| `LIBRESPRITE_RELAY_HOST` | `localhost` | Relay server bind address |
+| `LIBRESPRITE_RELAY_PORT` | `64823` | Relay server port |
+| `LIBRESPRITE_OUTPUT_DIR` | `/app/output` | Output directory (docker mode) |
+| `LIBRESPRITE_BIN` | `/usr/local/bin/libresprite` | LibreSprite binary path (docker mode) |
+
+---
+
+## Critique of the Original Plan
+
+The original `IMPLEMENTATION_PLAN.md` had several issues fixed in this implementation:
+
+| # | Issue | Severity | Fix Applied |
+|---|-------|----------|-------------|
+| 1 | **Used Lua scripting** — LibreSprite's scripting API is JavaScript, not Lua. Scripts written in Lua would not execute. | **Critical** | Switched entirely to JavaScript scripting API. |
+| 2 | **No API documentation** — The AI had no reference material and would hallucinate API calls. | **Critical** | Added MCP resources with full API reference and examples. |
+| 3 | **No MCP prompts** — The AI wasn't conditioned to use the tools correctly. | **High** | Added a prompt template that guides the AI. |
+| 4 | **Docker-only** — Required Docker for all usage, limiting compatibility with VS Code Copilot and Claude Code. | **High** | Added relay mode for native usage without Docker. |
+| 5 | **No live interaction** — Each script started a new LibreSprite process; couldn't interact with user's canvas. | **High** | Added relay server + remote script for live interaction. |
+| 6 | **Lua code injection** — The "security header" only set a variable that user code could overwrite. | **Medium** | Docker mode wraps scripts minimally; relay mode uses LibreSprite's sandboxed JS engine. |
+| 7 | **AppImage requires FUSE** — Docker containers don't provide FUSE. | **Medium** | Dockerfile extracts AppImage with `--appimage-extract`. |
+| 8 | **Missing `mcp[cli]` extras** — `pip install mcp` doesn't install transport extras. | **Medium** | Changed to `pip install "mcp[cli]"`. |
+| 9 | **Limited tool set** — Only had `generate_sprite`. | **Medium** | Added `run_script`, `get_sprite_info`, `get_pixel_data`, `create_pixel_art`, `list_sprites`. |
+| 10 | **No `.dockerignore` / `.gitignore`** — Build context included unnecessary files. | **Low** | Added both files. |
+
+---
+
+## Running Tests
 
 ```bash
 cd libresprite-mcp
-docker compose up --build
+pip install "mcp[cli]" flask
+python -m unittest test_server -v
 ```
-
----
-
-## Available Tools
-
-### `generate_sprite(lua_code: str) -> str`
-
-Execute arbitrary (sandboxed) Lua code inside LibreSprite. The script runs in headless batch mode. Dangerous Lua functions are disabled.
-
-### `list_sprites() -> str`
-
-List all sprite files that have been generated in the output directory.
-
-### `create_pixel_art(width, height, pixel_data, palette?) -> str`
-
-Convenience tool to create sprites from a simple text-based pixel map without writing Lua. Example:
-
-```
-width: 3, height: 3
-pixel_data: ".1.\n111\n.1."
-palette: "#ff0000"
-```
-
----
-
-## Security Model
-
-1. **Container isolation** – all code runs inside a disposable Docker container.
-2. **Non-root user** – the server process runs as `spriteuser`.
-3. **Lua sandbox** – dangerous globals (`os.execute`, `io.open`, `require`, `debug`, etc.) are set to `nil` before user code runs.
-4. **Pre-validation** – user Lua code is scanned for blocked patterns before execution.
-5. **Timeout** – scripts are killed after 30 seconds.
-6. **Resource limits** – Docker Compose sets CPU and memory caps.
-7. **Output isolation** – only the bind-mounted `output/` directory is writable to the host.
