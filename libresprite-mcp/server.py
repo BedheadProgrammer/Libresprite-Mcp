@@ -164,30 +164,54 @@ class LibrespriteProxy:
 # ---------------------------------------------------------------------------
 
 
+def _png_chunk(ctype: bytes, data: bytes) -> bytes:
+    """Build a single PNG chunk (type + data + CRC)."""
+    import struct
+    import zlib as _zlib
+
+    c = ctype + data
+    crc = _zlib.crc32(c) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + c + struct.pack(">I", crc)
+
+
+def _rgba_to_png(rgba_data: bytes, width: int, height: int) -> bytes:
+    """Construct a PNG from raw RGBA pixel data.
+
+    *rgba_data* must be exactly ``width * height * 4`` bytes in
+    row-major RGBA order.
+    """
+    import struct
+    import zlib
+
+    expected = width * height * 4
+    if len(rgba_data) != expected:
+        raise ValueError(
+            f"Expected {expected} bytes of RGBA data for "
+            f"{width}x{height}, got {len(rgba_data)}."
+        )
+
+    stride = width * 4
+    scanlines = bytearray()
+    for y in range(height):
+        scanlines.append(0)  # filter byte: None
+        scanlines.extend(rgba_data[y * stride : (y + 1) * stride])
+    compressed = zlib.compress(bytes(scanlines))
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    png = b"\x89PNG\r\n\x1a\n"
+    png += _png_chunk(b"IHDR", ihdr)
+    png += _png_chunk(b"IDAT", compressed)
+    png += _png_chunk(b"IEND", b"")
+    return png
+
+
 def _create_blank_png(path: str, width: int = 64, height: int = 64) -> None:
     """Create a minimal transparent RGBA PNG at *path*.
 
     Uses only the stdlib (struct + zlib) so Pillow is not required.
     """
-    import struct
-    import zlib
-
-    # Raw scanlines: filter-byte 0 + width×4 zero bytes per row
-    scanlines = b""
-    for _ in range(height):
-        scanlines += b"\x00" + b"\x00\x00\x00\x00" * width
-    compressed = zlib.compress(scanlines)
-
-    def _chunk(ctype: bytes, data: bytes) -> bytes:
-        c = ctype + data
-        crc = zlib.crc32(c) & 0xFFFFFFFF
-        return struct.pack(">I", len(data)) + c + struct.pack(">I", crc)
-
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-    png = b"\x89PNG\r\n\x1a\n"
-    png += _chunk(b"IHDR", ihdr)
-    png += _chunk(b"IDAT", compressed)
-    png += _chunk(b"IEND", b"")
+    rgba_data = b"\x00\x00\x00\x00" * (width * height)
+    png = _rgba_to_png(rgba_data, width, height)
     with open(path, "wb") as f:
         f.write(png)
 
@@ -431,31 +455,28 @@ def run_script(script: str) -> str:
     return _run_script_docker(script)
 
 
-@mcp.tool()
-def list_sprites() -> str:
-    """List all generated sprite files in the output directory.
+if MODE == "docker":
 
-    Only available in docker mode. Returns a newline-separated list of
-    filenames, or a message indicating the directory is empty.
-    """
-    if MODE != "docker":
-        return (
-            "list_sprites is only available in docker mode. "
-            "In relay mode, query the active sprite via run_script instead."
-        )
-    try:
-        files = sorted(
-            f
-            for f in os.listdir(OUTPUT_DIR)
-            if os.path.isfile(os.path.join(OUTPUT_DIR, f))
-        )
-    except FileNotFoundError:
-        return "Output directory does not exist."
+    @mcp.tool()
+    def list_sprites() -> str:
+        """List all generated sprite files in the output directory.
 
-    if not files:
-        return "No sprites have been generated yet."
+        Returns a newline-separated list of filenames, or a message
+        indicating the directory is empty.
+        """
+        try:
+            files = sorted(
+                f
+                for f in os.listdir(OUTPUT_DIR)
+                if os.path.isfile(os.path.join(OUTPUT_DIR, f))
+            )
+        except FileNotFoundError:
+            return "Output directory does not exist."
 
-    return "\n".join(files)
+        if not files:
+            return "No sprites have been generated yet."
+
+        return "\n".join(files)
 
 
 @mcp.tool()
@@ -592,19 +613,34 @@ def get_pixel_data(x: int, y: int, width: int = 1, height: int = 1) -> str:
     """
     if MODE != "relay":
         return "get_pixel_data is only available in relay mode."
+
+    # Cap the read area to avoid overwhelming LibreSprite's JS engine.
+    max_pixels = 4096
+    if width * height > max_pixels:
+        return (
+            f"Error: requested area ({width}x{height} = {width * height} "
+            f"pixels) exceeds the {max_pixels}-pixel limit. "
+            "Read a smaller region."
+        )
+
+    # Build all pixel data in a JS array, then emit as a single
+    # console.log call to avoid thousands of individual log calls
+    # which cause timeouts.
     script = (
         "var col = app.pixelColor;\n"
         "var img = app.activeImage;\n"
         "if (!img) { console.log('No active image.'); }\n"
         "else {\n"
+        "    var result = [];\n"
         f"    for (var py = {y}; py < {y + height}; py++) {{\n"
         f"        for (var px = {x}; px < {x + width}; px++) {{\n"
         "            var c = img.getPixel(px, py);\n"
-        "            console.log('(' + px + ',' + py + '): rgba(' "
-        "                + col.rgbaR(c) + ',' + col.rgbaG(c) + ',' "
+        "            result.push('(' + px + ',' + py + '):rgba('"
+        "                + col.rgbaR(c) + ',' + col.rgbaG(c) + ','"
         "                + col.rgbaB(c) + ',' + col.rgbaA(c) + ')');\n"
         "        }\n"
         "    }\n"
+        "    console.log(result.join('\\n'));\n"
         "}\n"
     )
     return run_script(script)
@@ -632,26 +668,98 @@ def screenshot() -> str | list:
     if MODE == "relay":
         if _proxy is None:
             return "Error: relay proxy is not initialised."
+        # Use getImageData() instead of getPNGData() to avoid base64
+        # encoding issues in LibreSprite's transport layer.  Raw RGBA
+        # bytes are hex-encoded (only 0-9a-f — completely safe for
+        # JSON / HTTP transport) and the PNG is reconstructed server-side.
         script = (
             "var img = app.activeImage;\n"
             "if (img) {\n"
-            "    var png = img.getPNGData();\n"
-            "    console.log('__MCP_PNG__:' + png);\n"
+            "    var data = img.getImageData();\n"
+            "    var w = img.width;\n"
+            "    var h = img.height;\n"
+            "    var parts = [];\n"
+            "    var chunk = '';\n"
+            "    for (var i = 0; i < data.length; i++) {\n"
+            "        var b = data[i];\n"
+            "        chunk += (b < 16 ? '0' : '') + b.toString(16);\n"
+            "        if (chunk.length >= 4096) {\n"
+            "            parts.push(chunk);\n"
+            "            chunk = '';\n"
+            "        }\n"
+            "    }\n"
+            "    if (chunk) parts.push(chunk);\n"
+            "    console.log('__MCP_IMGDATA__:' + w + ':' + h + ':'"
+            " + parts.join(''));\n"
             "} else {\n"
             "    console.log('No active sprite. Create one first.');\n"
             "}\n"
         )
         result = _proxy.run_script(script)
-        if "__MCP_PNG__:" in result:
-            b64_data = result.split("__MCP_PNG__:", 1)[1].strip()
+
+        # ---- Parse hex-encoded raw RGBA data ----
+        if "__MCP_IMGDATA__:" in result:
+            import re as _re
+
+            payload = result.split("__MCP_IMGDATA__:", 1)[1].strip()
+            # Format: "<width>:<height>:<hex_rgba>"
+            parts = payload.split(":", 2)
+            if len(parts) != 3:
+                return (
+                    "Error: malformed image data header. "
+                    f"Expected 3 parts, got {len(parts)}."
+                )
             try:
-                png_bytes = base64.b64decode(b64_data)
+                w, h = int(parts[0]), int(parts[1])
+            except ValueError:
+                return (
+                    "Error: could not parse image dimensions from: "
+                    f"'{parts[0]}' x '{parts[1]}'."
+                )
+            hex_data = _re.sub(r"[^0-9a-fA-F]", "", parts[2])
+            expected_len = w * h * 4 * 2  # 4 bytes/pixel, 2 hex chars/byte
+            if len(hex_data) != expected_len:
+                return (
+                    f"Error: expected {expected_len} hex chars for "
+                    f"{w}x{h} RGBA image, got {len(hex_data)}."
+                )
+            try:
+                rgba_bytes = bytes.fromhex(hex_data)
+                png_bytes = _rgba_to_png(rgba_bytes, w, h)
                 return [
                     "Current sprite preview:",
                     Image(data=png_bytes, format="png"),
                 ]
             except Exception as exc:
-                return f"Error decoding sprite image: {exc}"
+                snippet = hex_data[:80] + ("..." if len(hex_data) > 80 else "")
+                return (
+                    f"Error building PNG from pixel data: {exc}\n"
+                    f"Hex snippet: {snippet}"
+                )
+
+        # ---- Legacy fallback: getPNGData() base64 ----
+        if "__MCP_PNG__:" in result:
+            b64_data = result.split("__MCP_PNG__:", 1)[1].strip()
+            import re as _re
+            b64_data = _re.sub(r'\s+', '', b64_data)
+            try:
+                png_bytes = base64.b64decode(b64_data)
+                if len(png_bytes) < 8:
+                    return (
+                        "Error: decoded PNG data is too small "
+                        f"({len(png_bytes)} bytes). The sprite may "
+                        "be empty or getPNGData() returned invalid data."
+                    )
+                return [
+                    "Current sprite preview:",
+                    Image(data=png_bytes, format="png"),
+                ]
+            except Exception as exc:
+                snippet = b64_data[:80] + ("..." if len(b64_data) > 80 else "")
+                return (
+                    f"Error decoding sprite image: {exc}\n"
+                    f"Base64 snippet: {snippet}"
+                )
         return result
 
     # Docker mode – return the most recently generated sprite.
@@ -946,7 +1054,10 @@ def draw_image(width: int, height: int, pixel_colors: str) -> str:
 
 def main():
     """Start the MCP server."""
+    import sys
     global _proxy
+
+    print(f"[LibreSprite MCP] Starting in {MODE} mode", file=sys.stderr)
 
     if MODE == "relay":
         # Suppress noisy Flask/click logging that interferes with stdio.
@@ -961,6 +1072,17 @@ def main():
 
         _proxy = LibrespriteProxy(host=RELAY_HOST, port=RELAY_PORT)
         _proxy.start()
+        print(
+            f"[LibreSprite MCP] Relay server listening on "
+            f"{RELAY_HOST}:{RELAY_PORT}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[LibreSprite MCP] Docker headless mode — "
+            f"LibreSprite binary: {LIBRESPRITE_BIN}",
+            file=sys.stderr,
+        )
 
     mcp.run(transport="stdio")
 

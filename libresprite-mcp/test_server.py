@@ -554,17 +554,35 @@ class TestScreenshot(unittest.TestCase):
         self.assertIn("No active sprite", result)
 
     @patch("server.MODE", "relay")
-    def test_relay_mode_returns_image_from_png_data(self):
-        """Relay mode should decode base64 PNG and return an Image."""
+    def test_relay_mode_returns_image_from_raw_imgdata(self):
+        """Relay mode should decode hex RGBA data and return an Image."""
+        from mcp.server.fastmcp.utilities.types import Image
+
+        # 2x2 red pixels: RGBA = ff000000ff for each (but fully opaque)
+        # Each pixel: R=ff G=00 B=00 A=ff => "ff0000ff"
+        hex_data = "ff0000ff" * 4  # 2x2 = 4 pixels
+        mock_proxy = MagicMock()
+        mock_proxy.run_script.return_value = (
+            f"__MCP_IMGDATA__:2:2:{hex_data}\n"
+        )
+        with patch("server._proxy", mock_proxy):
+            result = screenshot()
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], "Current sprite preview:")
+        self.assertIsInstance(result[1], Image)
+
+    @patch("server.MODE", "relay")
+    def test_relay_mode_legacy_png_fallback(self):
+        """Relay mode should still handle __MCP_PNG__ base64 as fallback."""
         import base64
         from mcp.server.fastmcp.utilities.types import Image
 
-        # Create a tiny valid PNG and base64-encode it
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
-            server._create_blank_png(tmp.name, 2, 2)
-            with open(tmp.name, "rb") as f:
-                png_b64 = base64.b64encode(f.read()).decode()
+        # Build a tiny valid PNG in memory using the server helper
+        rgba_data = b"\x00\x00\x00\x00" * 4  # 2x2 transparent
+        png_bytes = server._rgba_to_png(rgba_data, 2, 2)
+        png_b64 = base64.b64encode(png_bytes).decode()
 
         mock_proxy = MagicMock()
         mock_proxy.run_script.return_value = f"__MCP_PNG__:{png_b64}"
@@ -577,14 +595,14 @@ class TestScreenshot(unittest.TestCase):
         self.assertIsInstance(result[1], Image)
 
     @patch("server.MODE", "relay")
-    def test_relay_mode_script_uses_get_png_data(self):
-        """The relay script should call getPNGData on the active image."""
+    def test_relay_mode_script_uses_get_image_data(self):
+        """The relay script should call getImageData on the active image."""
         mock_proxy = MagicMock()
         mock_proxy.run_script.return_value = "No active sprite."
         with patch("server._proxy", mock_proxy):
             screenshot()
         script_arg = mock_proxy.run_script.call_args[0][0]
-        self.assertIn("getPNGData", script_arg)
+        self.assertIn("getImageData", script_arg)
         self.assertIn("app.activeImage", script_arg)
 
 
