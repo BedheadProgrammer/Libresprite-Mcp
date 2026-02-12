@@ -25,12 +25,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #    AppImages require FUSE to self-mount, which is unavailable in most
 #    Docker containers. Extracting the AppImage avoids this issue entirely.
 WORKDIR /app/bin
-RUN wget -q https://github.com/LibreSprite/LibreSprite/releases/download/continuous/LibreSprite-x86_64.AppImage \
-    && chmod +x LibreSprite-x86_64.AppImage \
-    && ./LibreSprite-x86_64.AppImage --appimage-extract \
+RUN wget -q https://github.com/LibreSprite/LibreSprite/releases/download/v1.2/LibreSprite-anylinux-x86_64.AppImage \
+    && chmod +x LibreSprite-anylinux-x86_64.AppImage \
+    && ./LibreSprite-anylinux-x86_64.AppImage --appimage-extract \
     && mv squashfs-root libresprite \
-    && rm LibreSprite-x86_64.AppImage \
-    && ln -s /app/bin/libresprite/AppRun /usr/local/bin/libresprite
+    && rm LibreSprite-anylinux-x86_64.AppImage \
+    && ln -s /app/bin/libresprite/bin/libresprite /usr/local/bin/libresprite
 
 # 3. Install Python MCP SDK (with CLI extras for FastMCP transport support)
 RUN pip install --no-cache-dir "mcp[cli]"
@@ -41,7 +41,10 @@ RUN mkdir -p /app/output
 COPY server.py .
 COPY resources/ resources/
 
-# 5. Create a non-root user (Security Best Practice)
+# 5. Create X11 socket directory (avoids Xvfb warning as non-root)
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
+# 6. Create a non-root user (Security Best Practice)
 RUN useradd -m spriteuser \
     && chown -R spriteuser:spriteuser /app
 
