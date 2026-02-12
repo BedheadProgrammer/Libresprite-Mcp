@@ -26,6 +26,7 @@ from server import (
     fill_sprite,
     list_sprites,
     run_script,
+    screenshot,
     set_pixels,
     read_reference,
     read_examples,
@@ -477,6 +478,125 @@ class TestGetPixelData(unittest.TestCase):
 
         result = get_pixel_data(0, 0)
         self.assertIn("relay mode", result)
+
+
+class TestScreenshot(unittest.TestCase):
+    """Test the screenshot tool."""
+
+    def test_docker_mode_no_output_dir(self):
+        """When the output directory doesn't exist, return an error string."""
+        with patch("server.OUTPUT_DIR", "/nonexistent/path"):
+            result = screenshot()
+        self.assertIsInstance(result, str)
+        self.assertIn("No output directory", result)
+
+    def test_docker_mode_empty_output_dir(self):
+        """When the output directory is empty, return an informative message."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = screenshot()
+        self.assertIsInstance(result, str)
+        self.assertIn("No sprites generated", result)
+
+    def test_docker_mode_returns_image_for_existing_png(self):
+        """When a PNG exists in output, return a list with text and Image."""
+        import tempfile
+        from mcp.server.fastmcp.utilities.types import Image
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a minimal PNG file
+            png_path = os.path.join(tmpdir, "test-sprite.png")
+            server._create_blank_png(png_path, 4, 4)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = screenshot()
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertIn("test-sprite.png", result[0])
+        self.assertIsInstance(result[1], Image)
+
+    def test_docker_mode_returns_most_recent_png(self):
+        """Should return the most recently modified PNG."""
+        import tempfile
+        import time
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_path = os.path.join(tmpdir, "old.png")
+            server._create_blank_png(old_path, 4, 4)
+            time.sleep(0.05)
+            new_path = os.path.join(tmpdir, "new.png")
+            server._create_blank_png(new_path, 4, 4)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = screenshot()
+
+        self.assertIsInstance(result, list)
+        self.assertIn("new.png", result[0])
+
+    @patch("server.MODE", "relay")
+    def test_relay_mode_no_proxy(self):
+        """In relay mode with no proxy, return an error string."""
+        with patch("server._proxy", None):
+            result = screenshot()
+        self.assertIsInstance(result, str)
+        self.assertIn("Error", result)
+
+    @patch("server.MODE", "relay")
+    def test_relay_mode_no_active_image(self):
+        """Relay mode with no active sprite returns the fallback message."""
+        mock_proxy = MagicMock()
+        mock_proxy.run_script.return_value = "No active sprite. Create one first."
+        with patch("server._proxy", mock_proxy):
+            result = screenshot()
+        self.assertIsInstance(result, str)
+        self.assertIn("No active sprite", result)
+
+    @patch("server.MODE", "relay")
+    def test_relay_mode_returns_image_from_png_data(self):
+        """Relay mode should decode base64 PNG and return an Image."""
+        import base64
+        from mcp.server.fastmcp.utilities.types import Image
+
+        # Create a tiny valid PNG and base64-encode it
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+            server._create_blank_png(tmp.name, 2, 2)
+            with open(tmp.name, "rb") as f:
+                png_b64 = base64.b64encode(f.read()).decode()
+
+        mock_proxy = MagicMock()
+        mock_proxy.run_script.return_value = f"__MCP_PNG__:{png_b64}"
+        with patch("server._proxy", mock_proxy):
+            result = screenshot()
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], "Current sprite preview:")
+        self.assertIsInstance(result[1], Image)
+
+    @patch("server.MODE", "relay")
+    def test_relay_mode_script_uses_get_png_data(self):
+        """The relay script should call getPNGData on the active image."""
+        mock_proxy = MagicMock()
+        mock_proxy.run_script.return_value = "No active sprite."
+        with patch("server._proxy", mock_proxy):
+            screenshot()
+        script_arg = mock_proxy.run_script.call_args[0][0]
+        self.assertIn("getPNGData", script_arg)
+
+
+class TestPromptMentionsScreenshot(unittest.TestCase):
+    """Test that the prompt mentions the screenshot tool."""
+
+    def test_prompt_mentions_screenshot(self):
+        result = libresprite("test")
+        self.assertIn("screenshot", result)
+
+    def test_prompt_mentions_visual_feedback(self):
+        result = libresprite("test")
+        self.assertIn("VISUAL FEEDBACK", result)
 
 
 if __name__ == "__main__":
