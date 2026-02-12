@@ -643,7 +643,7 @@ def screenshot() -> str | list:
         )
         result = _proxy.run_script(script)
         if "__MCP_PNG__:" in result:
-            b64_data = result.split("__MCP_PNG__:")[1].strip()
+            b64_data = result.split("__MCP_PNG__:", 1)[1].strip()
             try:
                 png_bytes = base64.b64decode(b64_data)
                 return [

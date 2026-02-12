@@ -585,6 +585,7 @@ class TestScreenshot(unittest.TestCase):
             screenshot()
         script_arg = mock_proxy.run_script.call_args[0][0]
         self.assertIn("getPNGData", script_arg)
+        self.assertIn("app.activeImage", script_arg)
 
 
 class TestPromptMentionsScreenshot(unittest.TestCase):
