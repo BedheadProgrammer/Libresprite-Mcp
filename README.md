@@ -139,6 +139,71 @@ docker run --rm -i -v "$(pwd)/output:/app/output" libresprite-mcp
 
 ---
 
+## Quick Start — Docker Relay Mode
+
+You can also run the MCP server inside a Docker container while communicating
+with a LibreSprite instance running on your host machine.  This combines the
+convenience of a containerised server with live interaction in your real
+LibreSprite session.
+
+```
+AI Client (Copilot/Claude) → MCP Server (Docker) → HTTP Relay (port 64823) → LibreSprite (host)
+```
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) (and Docker Compose)
+- [LibreSprite](https://github.com/LibreSprite/LibreSprite) installed on the host
+
+### Build
+
+```bash
+cd libresprite-mcp
+docker build -t libresprite-mcp .
+```
+
+### Run
+
+```bash
+docker run --rm -i -p 64823:64823 \
+    -e LIBRESPRITE_MODE=relay \
+    -e LIBRESPRITE_RELAY_HOST=0.0.0.0 \
+    libresprite-mcp
+```
+
+Or using Docker Compose:
+
+```bash
+docker compose run --service-ports libresprite-mcp-relay
+```
+
+### Connect LibreSprite
+
+1. Copy `remote/mcp.js` into your LibreSprite scripts folder (see paths under [Relay Mode setup](#2-set-up-the-libresprite-remote-script)).
+2. Open LibreSprite on the host.
+3. Run the `mcp.js` script from the Scripts menu and click **Connect**.
+
+### Connect to an MCP Client (Docker relay mode)
+
+```json
+{
+    "mcpServers": {
+        "libresprite": {
+            "command": "docker",
+            "args": [
+                "run", "--rm", "-i",
+                "-p", "64823:64823",
+                "-e", "LIBRESPRITE_MODE=relay",
+                "-e", "LIBRESPRITE_RELAY_HOST=0.0.0.0",
+                "libresprite-mcp"
+            ]
+        }
+    }
+}
+```
+
+---
+
 ## Available MCP Tools
 
 | Tool | Description | Modes |
