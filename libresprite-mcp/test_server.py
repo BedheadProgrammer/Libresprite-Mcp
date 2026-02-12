@@ -19,11 +19,18 @@ import server
 from server import (
     _run_script_docker,
     _parse_hex_color,
+    _create_blank_png,
+    _rgba_to_png,
+    _read_png_info,
+    _read_png_pixels,
+    _get_latest_sprite_path,
     create_pixel_art,
     create_sprite,
     draw_image,
     draw_rect,
     fill_sprite,
+    get_pixel_data,
+    get_sprite_info,
     list_sprites,
     run_script,
     screenshot,
@@ -100,8 +107,10 @@ class TestListSprites(unittest.TestCase):
 
     @patch("server.MODE", "relay")
     def test_relay_mode_returns_message(self):
+        # list_sprites is only registered in docker mode; calling it in relay
+        # mode still runs the same docker-mode function which checks disk.
         result = list_sprites()
-        self.assertIn("relay mode", result)
+        self.assertIsInstance(result, str)
 
 
 class TestCreatePixelArt(unittest.TestCase):
@@ -463,21 +472,63 @@ class TestDrawImage(unittest.TestCase):
 class TestGetSpriteInfo(unittest.TestCase):
     """Test the get_sprite_info tool."""
 
-    def test_docker_mode_returns_message(self):
-        from server import get_sprite_info
+    def test_docker_mode_no_sprites(self):
+        """When no sprites exist, should say so."""
+        with patch("server.OUTPUT_DIR", "/nonexistent/path"):
+            result = get_sprite_info()
+        self.assertIn("No sprites", result)
 
-        result = get_sprite_info()
-        self.assertIn("relay mode", result)
+    def test_docker_mode_reads_png_info(self):
+        """Should return width/height/colorMode from a generated PNG."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "test.png")
+            _create_blank_png(png_path, 32, 16)
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_sprite_info()
+        self.assertIn("width:32", result)
+        self.assertIn("height:16", result)
+        self.assertIn("colorMode:RGBA", result)
+        self.assertIn("layerCount:1", result)
+        self.assertIn("filename:test.png", result)
 
 
 class TestGetPixelData(unittest.TestCase):
     """Test the get_pixel_data tool."""
 
-    def test_docker_mode_returns_message(self):
-        from server import get_pixel_data
+    def test_docker_mode_no_sprites(self):
+        """When no sprites exist, should say so."""
+        with patch("server.OUTPUT_DIR", "/nonexistent/path"):
+            result = get_pixel_data(0, 0)
+        self.assertIn("No sprites", result)
 
-        result = get_pixel_data(0, 0)
-        self.assertIn("relay mode", result)
+    def test_docker_mode_reads_transparent_pixel(self):
+        """A blank PNG should return transparent pixels."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "blank.png")
+            _create_blank_png(png_path, 4, 4)
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_pixel_data(0, 0)
+        self.assertIn("(0,0):rgba(0,0,0,0)", result)
+
+    def test_docker_mode_area_limit(self):
+        """Large read areas should be rejected."""
+        result = get_pixel_data(0, 0, width=100, height=100)
+        self.assertIn("exceeds", result)
+
+    def test_docker_mode_out_of_bounds(self):
+        """Pixels outside the image should be labeled out-of-bounds."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "small.png")
+            _create_blank_png(png_path, 2, 2)
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_pixel_data(5, 5)
+        self.assertIn("out-of-bounds", result)
 
 
 class TestScreenshot(unittest.TestCase):
@@ -500,9 +551,9 @@ class TestScreenshot(unittest.TestCase):
         self.assertIn("No sprites generated", result)
 
     def test_docker_mode_returns_image_for_existing_png(self):
-        """When a PNG exists in output, return a list with text and Image."""
+        """When a PNG exists in output, return a list with TextContent and ImageContent."""
         import tempfile
-        from mcp.server.fastmcp.utilities.types import Image
+        from mcp.types import TextContent, ImageContent
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a minimal PNG file
@@ -514,13 +565,16 @@ class TestScreenshot(unittest.TestCase):
 
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 2)
-        self.assertIn("test-sprite.png", result[0])
-        self.assertIsInstance(result[1], Image)
+        self.assertIsInstance(result[0], TextContent)
+        self.assertIn("test-sprite.png", result[0].text)
+        self.assertIsInstance(result[1], ImageContent)
+        self.assertEqual(result[1].mimeType, "image/png")
 
     def test_docker_mode_returns_most_recent_png(self):
         """Should return the most recently modified PNG."""
         import tempfile
         import time
+        from mcp.types import TextContent
 
         with tempfile.TemporaryDirectory() as tmpdir:
             old_path = os.path.join(tmpdir, "old.png")
@@ -533,7 +587,8 @@ class TestScreenshot(unittest.TestCase):
                 result = screenshot()
 
         self.assertIsInstance(result, list)
-        self.assertIn("new.png", result[0])
+        self.assertIsInstance(result[0], TextContent)
+        self.assertIn("new.png", result[0].text)
 
     @patch("server.MODE", "relay")
     def test_relay_mode_no_proxy(self):
@@ -555,8 +610,8 @@ class TestScreenshot(unittest.TestCase):
 
     @patch("server.MODE", "relay")
     def test_relay_mode_returns_image_from_raw_imgdata(self):
-        """Relay mode should decode hex RGBA data and return an Image."""
-        from mcp.server.fastmcp.utilities.types import Image
+        """Relay mode should decode hex RGBA data and return an ImageContent."""
+        from mcp.types import TextContent, ImageContent
 
         # 2x2 red pixels: RGBA = ff000000ff for each (but fully opaque)
         # Each pixel: R=ff G=00 B=00 A=ff => "ff0000ff"
@@ -570,14 +625,16 @@ class TestScreenshot(unittest.TestCase):
 
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0], "Current sprite preview:")
-        self.assertIsInstance(result[1], Image)
+        self.assertIsInstance(result[0], TextContent)
+        self.assertEqual(result[0].text, "Current sprite preview:")
+        self.assertIsInstance(result[1], ImageContent)
+        self.assertEqual(result[1].mimeType, "image/png")
 
     @patch("server.MODE", "relay")
     def test_relay_mode_legacy_png_fallback(self):
         """Relay mode should still handle __MCP_PNG__ base64 as fallback."""
         import base64
-        from mcp.server.fastmcp.utilities.types import Image
+        from mcp.types import TextContent, ImageContent
 
         # Build a tiny valid PNG in memory using the server helper
         rgba_data = b"\x00\x00\x00\x00" * 4  # 2x2 transparent
@@ -591,8 +648,10 @@ class TestScreenshot(unittest.TestCase):
 
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0], "Current sprite preview:")
-        self.assertIsInstance(result[1], Image)
+        self.assertIsInstance(result[0], TextContent)
+        self.assertEqual(result[0].text, "Current sprite preview:")
+        self.assertIsInstance(result[1], ImageContent)
+        self.assertEqual(result[1].mimeType, "image/png")
 
     @patch("server.MODE", "relay")
     def test_relay_mode_script_uses_get_image_data(self):
@@ -657,6 +716,322 @@ class TestRelayProxyInit(unittest.TestCase):
             resp = client.get("/ping")
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.get_json(), {"status": "pong"})
+
+
+# ---------------------------------------------------------------------------
+# PNG reader helpers
+# ---------------------------------------------------------------------------
+
+
+class TestReadPngInfo(unittest.TestCase):
+    """Test the _read_png_info helper."""
+
+    def test_reads_dimensions(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            _create_blank_png(f.name, 48, 24)
+            info = _read_png_info(f.name)
+        os.unlink(f.name)
+        self.assertEqual(info["width"], 48)
+        self.assertEqual(info["height"], 24)
+        self.assertEqual(info["color_mode"], "RGBA")
+
+    def test_invalid_file_raises(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
+            f.write("not a png")
+        with self.assertRaises(ValueError):
+            _read_png_info(f.name)
+        os.unlink(f.name)
+
+
+class TestReadPngPixels(unittest.TestCase):
+    """Test the _read_png_pixels helper."""
+
+    def test_blank_png_all_transparent(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            _create_blank_png(f.name, 4, 4)
+            rgba, w, h = _read_png_pixels(f.name)
+        os.unlink(f.name)
+        self.assertEqual(w, 4)
+        self.assertEqual(h, 4)
+        self.assertEqual(len(rgba), 4 * 4 * 4)
+        # Every byte should be 0 (transparent black)
+        self.assertTrue(all(b == 0 for b in rgba))
+
+    def test_colored_png_roundtrip(self):
+        """Build a PNG from known RGBA data and verify decode matches."""
+        import tempfile
+
+        w, h = 3, 2
+        # 6 pixels: red, green, blue, yellow, magenta, cyan — all opaque
+        raw = (
+            b"\xff\x00\x00\xff"  # red
+            b"\x00\xff\x00\xff"  # green
+            b"\x00\x00\xff\xff"  # blue
+            b"\xff\xff\x00\xff"  # yellow
+            b"\xff\x00\xff\xff"  # magenta
+            b"\x00\xff\xff\xff"  # cyan
+        )
+        png_bytes = _rgba_to_png(raw, w, h)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(png_bytes)
+            path = f.name
+        decoded, dw, dh = _read_png_pixels(path)
+        os.unlink(path)
+        self.assertEqual(dw, w)
+        self.assertEqual(dh, h)
+        self.assertEqual(decoded, raw)
+
+
+class TestGetLatestSpritePath(unittest.TestCase):
+    """Test the _get_latest_sprite_path helper."""
+
+    def test_nonexistent_dir_returns_none(self):
+        with patch("server.OUTPUT_DIR", "/no/such/dir"):
+            result = _get_latest_sprite_path()
+        self.assertIsNone(result)
+
+    def test_empty_dir_returns_none(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = _get_latest_sprite_path()
+        self.assertIsNone(result)
+
+    def test_returns_most_recent(self):
+        import tempfile
+        import time
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old = os.path.join(tmpdir, "old.png")
+            _create_blank_png(old, 4, 4)
+            time.sleep(0.05)
+            new = os.path.join(tmpdir, "new.png")
+            _create_blank_png(new, 8, 8)
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = _get_latest_sprite_path()
+        self.assertIsNotNone(result)
+        self.assertTrue(result.endswith("new.png"))
+
+
+# ---------------------------------------------------------------------------
+# Docker-mode integration: create sprite → query with tools
+# ---------------------------------------------------------------------------
+
+
+class TestDockerModeCreateThenGetInfo(unittest.TestCase):
+    """Create a sprite in Docker mode and then use get_sprite_info to read it."""
+
+    def test_create_blank_then_get_info(self):
+        """create_sprite → get_sprite_info should return correct dimensions."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Simulate what _run_script_docker does: save a PNG in OUTPUT_DIR
+            png_path = os.path.join(tmpdir, "sprite.png")
+            _create_blank_png(png_path, 32, 32)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_sprite_info()
+
+        self.assertIn("width:32", result)
+        self.assertIn("height:32", result)
+        self.assertIn("colorMode:RGBA", result)
+        self.assertIn("layerCount:1", result)
+
+    def test_create_small_sprite_then_get_info(self):
+        """Create a 8x8 sprite and verify info."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "tiny.png")
+            _create_blank_png(png_path, 8, 8)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_sprite_info()
+
+        self.assertIn("width:8", result)
+        self.assertIn("height:8", result)
+        self.assertIn("filename:tiny.png", result)
+
+
+class TestDockerModeCreateThenGetPixels(unittest.TestCase):
+    """Create a sprite in Docker mode and use get_pixel_data to read pixels."""
+
+    def test_blank_sprite_pixels_are_transparent(self):
+        """A blank sprite should have all transparent pixels."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "blank.png")
+            _create_blank_png(png_path, 8, 8)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_pixel_data(0, 0, width=2, height=2)
+
+        self.assertIn("(0,0):rgba(0,0,0,0)", result)
+        self.assertIn("(1,0):rgba(0,0,0,0)", result)
+        self.assertIn("(0,1):rgba(0,0,0,0)", result)
+        self.assertIn("(1,1):rgba(0,0,0,0)", result)
+
+    def test_colored_sprite_pixels(self):
+        """Build a sprite with known colors and verify get_pixel_data."""
+        import tempfile
+
+        w, h = 4, 4
+        # Fill with solid red
+        raw = b"\xff\x00\x00\xff" * (w * h)
+        png_bytes = _rgba_to_png(raw, w, h)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "red.png")
+            with open(png_path, "wb") as f:
+                f.write(png_bytes)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_pixel_data(0, 0, width=2, height=2)
+
+        self.assertIn("(0,0):rgba(255,0,0,255)", result)
+        self.assertIn("(1,0):rgba(255,0,0,255)", result)
+        self.assertIn("(0,1):rgba(255,0,0,255)", result)
+        self.assertIn("(1,1):rgba(255,0,0,255)", result)
+
+    def test_mixed_colors(self):
+        """Create a 2x2 sprite with distinct colors and read each pixel."""
+        import tempfile
+
+        raw = (
+            b"\xff\x00\x00\xff"  # (0,0) red
+            b"\x00\xff\x00\xff"  # (1,0) green
+            b"\x00\x00\xff\xff"  # (0,1) blue
+            b"\xff\xff\x00\xff"  # (1,1) yellow
+        )
+        png_bytes = _rgba_to_png(raw, 2, 2)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "mixed.png")
+            with open(png_path, "wb") as f:
+                f.write(png_bytes)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_pixel_data(0, 0, width=2, height=2)
+
+        self.assertIn("(0,0):rgba(255,0,0,255)", result)
+        self.assertIn("(1,0):rgba(0,255,0,255)", result)
+        self.assertIn("(0,1):rgba(0,0,255,255)", result)
+        self.assertIn("(1,1):rgba(255,255,0,255)", result)
+
+    def test_read_subregion(self):
+        """Reading a subregion of a larger sprite returns correct pixels."""
+        import tempfile
+
+        # 4x4 sprite, all green
+        raw = b"\x00\xff\x00\xff" * 16
+        png_bytes = _rgba_to_png(raw, 4, 4)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "green.png")
+            with open(png_path, "wb") as f:
+                f.write(png_bytes)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                # Read 2x2 region starting at (1,1)
+                result = get_pixel_data(1, 1, width=2, height=2)
+
+        self.assertIn("(1,1):rgba(0,255,0,255)", result)
+        self.assertIn("(2,1):rgba(0,255,0,255)", result)
+        self.assertIn("(1,2):rgba(0,255,0,255)", result)
+        self.assertIn("(2,2):rgba(0,255,0,255)", result)
+        # Should NOT contain (0,0)
+        self.assertNotIn("(0,0)", result)
+
+    def test_partial_alpha(self):
+        """Pixels with partial transparency should be read correctly."""
+        import tempfile
+
+        # Single pixel with 50% alpha
+        raw = b"\x80\x40\x20\x80"  # rgba(128, 64, 32, 128)
+        png_bytes = _rgba_to_png(raw, 1, 1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "alpha.png")
+            with open(png_path, "wb") as f:
+                f.write(png_bytes)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                result = get_pixel_data(0, 0)
+
+        self.assertIn("(0,0):rgba(128,64,32,128)", result)
+
+
+class TestDockerModeEndToEndWorkflow(unittest.TestCase):
+    """Simulate a complete Docker-mode workflow: create → draw → query."""
+
+    def test_draw_image_then_read_info_and_pixels(self):
+        """draw_image creates a sprite; get_sprite_info and get_pixel_data
+        should both work on pngs generated by _rgba_to_png."""
+        import tempfile
+
+        # 3x3 sprite — red center, transparent border
+        raw = (
+            b"\x00\x00\x00\x00" b"\x00\x00\x00\x00" b"\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00" b"\xff\x00\x00\xff" b"\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00" b"\x00\x00\x00\x00" b"\x00\x00\x00\x00"
+        )
+        png_bytes = _rgba_to_png(raw, 3, 3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            png_path = os.path.join(tmpdir, "cross.png")
+            with open(png_path, "wb") as f:
+                f.write(png_bytes)
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                info = get_sprite_info()
+                center = get_pixel_data(1, 1)
+                corner = get_pixel_data(0, 0)
+
+        # Info
+        self.assertIn("width:3", info)
+        self.assertIn("height:3", info)
+        # Center pixel is red
+        self.assertIn("(1,1):rgba(255,0,0,255)", center)
+        # Corner pixel is transparent
+        self.assertIn("(0,0):rgba(0,0,0,0)", corner)
+
+    def test_multiple_sprites_reads_latest(self):
+        """When multiple sprites exist, tools read the most recent one."""
+        import tempfile
+        import time
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Older sprite: 4x4 red
+            old_path = os.path.join(tmpdir, "old.png")
+            old_raw = b"\xff\x00\x00\xff" * 16
+            with open(old_path, "wb") as f:
+                f.write(_rgba_to_png(old_raw, 4, 4))
+            time.sleep(0.05)
+
+            # Newer sprite: 8x8 blue
+            new_path = os.path.join(tmpdir, "new.png")
+            new_raw = b"\x00\x00\xff\xff" * 64
+            with open(new_path, "wb") as f:
+                f.write(_rgba_to_png(new_raw, 8, 8))
+
+            with patch("server.OUTPUT_DIR", tmpdir):
+                info = get_sprite_info()
+                pixel = get_pixel_data(0, 0)
+
+        # Should reflect the newer 8x8 blue sprite
+        self.assertIn("width:8", info)
+        self.assertIn("height:8", info)
+        self.assertIn("filename:new.png", info)
+        self.assertIn("(0,0):rgba(0,0,255,255)", pixel)
 
 
 if __name__ == "__main__":
