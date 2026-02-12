@@ -424,6 +424,8 @@ class TestDrawImage(unittest.TestCase):
         result = draw_image(1, 1, '["."]')
         # Should not raise a colour-validation error.
         self.assertNotIn("Invalid", result)
+        # Should have called through to run_script successfully.
+        self.assertTrue(mock_docker.called)
 
     @patch("server._run_script_docker")
     def test_transparent_pixel_generates_zeros(self, mock_docker):

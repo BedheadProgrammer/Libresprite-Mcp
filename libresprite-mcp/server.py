@@ -688,7 +688,7 @@ def draw_image(width: int, height: int, pixel_colors: str) -> str:
     row-major order (left-to-right, top-to-bottom).  The tool creates a new
     sprite of the given size and fills it with the supplied colours.
 
-    A 64×64 sprite is 4 096 entries — roughly 10 k tokens — well within a
+    A 64x64 sprite is 4096 entries — roughly 10k tokens — well within a
     standard context window.
 
     Args:
@@ -747,9 +747,9 @@ def draw_image(width: int, height: int, pixel_colors: str) -> str:
     array_lines: list[str] = []
     for start in range(0, len(rgba_values), chunk_size):
         chunk = ",".join(rgba_values[start : start + chunk_size])
-        array_lines.append(f"    {chunk},")
+        array_lines.append(f"    {chunk}")
 
-    array_body = "\n".join(array_lines)
+    array_body = ",\n".join(array_lines)
 
     js_code = (
         "app.command.NewFile();\n"
