@@ -14,6 +14,7 @@ Supports two modes:
 Set the ``LIBRESPRITE_MODE`` environment variable to choose the mode.
 """
 
+import base64
 import json
 import os
 import subprocess
@@ -21,6 +22,7 @@ import threading
 import uuid
 
 from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.fastmcp.utilities.types import Image
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -374,6 +376,11 @@ def libresprite(prompt: str) -> str:
         "5. `fill_sprite(color)` — fill the entire image with a colour.\n"
         "6. `create_pixel_art(width, height, pixel_data, palette?)` — "
         "create sprites from a text-based pixel map.\n\n"
+        "VISUAL FEEDBACK — after creating or editing a sprite, call "
+        "`screenshot()` to see what it looks like.  This returns an inline "
+        "image of the current sprite so you can evaluate your work and "
+        "decide whether to adjust it.  Use this iterative loop:\n"
+        "  draw → screenshot → evaluate → fix → screenshot → done\n\n"
         "Only fall back to `run_script` for advanced operations that the "
         "declarative tools cannot handle (e.g. animation frames, layers, "
         "palette manipulation, or complex procedural generation).  If you "
@@ -601,6 +608,76 @@ def get_pixel_data(x: int, y: int, width: int = 1, height: int = 1) -> str:
         "}\n"
     )
     return run_script(script)
+
+
+@mcp.tool()
+def screenshot() -> str | list:
+    """Take a screenshot of the current sprite being worked on.
+
+    Use this tool to visually inspect your work after creating or editing a
+    sprite.  It returns the sprite as an inline image so you can evaluate
+    whether it looks correct and decide what to adjust.
+
+    **Recommended workflow:**
+    1. Create or edit a sprite with any drawing tool.
+    2. Call ``screenshot()`` to see the result.
+    3. If something looks off, use ``set_pixels`` or other tools to fix it.
+    4. Call ``screenshot()`` again to verify.
+
+    In **relay mode** the current active sprite is captured directly from the
+    running LibreSprite instance.
+
+    In **docker mode** the most recently generated sprite file is returned.
+    """
+    if MODE == "relay":
+        if _proxy is None:
+            return "Error: relay proxy is not initialised."
+        script = (
+            "var img = app.activeImage;\n"
+            "if (img) {\n"
+            "    var png = img.getPNGData();\n"
+            "    console.log('__MCP_PNG__:' + png);\n"
+            "} else {\n"
+            "    console.log('No active sprite. Create one first.');\n"
+            "}\n"
+        )
+        result = _proxy.run_script(script)
+        if "__MCP_PNG__:" in result:
+            b64_data = result.split("__MCP_PNG__:", 1)[1].strip()
+            try:
+                png_bytes = base64.b64decode(b64_data)
+                return [
+                    "Current sprite preview:",
+                    Image(data=png_bytes, format="png"),
+                ]
+            except Exception as exc:
+                return f"Error decoding sprite image: {exc}"
+        return result
+
+    # Docker mode – return the most recently generated sprite.
+    try:
+        files = [
+            f
+            for f in os.listdir(OUTPUT_DIR)
+            if f.endswith(".png")
+            and os.path.isfile(os.path.join(OUTPUT_DIR, f))
+        ]
+    except FileNotFoundError:
+        return "No output directory found. Generate a sprite first."
+
+    if not files:
+        return "No sprites generated yet. Create a sprite first."
+
+    # Sort by modification time, most recent first.
+    files.sort(
+        key=lambda f: os.path.getmtime(os.path.join(OUTPUT_DIR, f)),
+        reverse=True,
+    )
+    latest = os.path.join(OUTPUT_DIR, files[0])
+    return [
+        f"Latest sprite preview ({files[0]}):",
+        Image(path=latest),
+    ]
 
 
 # -- Declarative pixel-art tools -------------------------------------------
