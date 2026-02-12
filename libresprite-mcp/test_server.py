@@ -21,6 +21,7 @@ from server import (
     _parse_hex_color,
     create_pixel_art,
     create_sprite,
+    draw_image,
     draw_rect,
     fill_sprite,
     list_sprites,
@@ -181,10 +182,18 @@ class TestPrompt(unittest.TestCase):
 
     def test_prompt_mentions_declarative_tools(self):
         result = libresprite("test")
+        self.assertIn("draw_image", result)
         self.assertIn("create_sprite", result)
         self.assertIn("set_pixels", result)
         self.assertIn("draw_rect", result)
         self.assertIn("fill_sprite", result)
+
+    def test_prompt_mentions_draw_image_as_primary(self):
+        result = libresprite("test")
+        # draw_image should appear before run_script in the prompt
+        draw_idx = result.index("draw_image")
+        run_idx = result.index("run_script")
+        self.assertLess(draw_idx, run_idx)
 
     def test_prompt_mentions_resources(self):
         result = libresprite("test")
@@ -378,6 +387,74 @@ class TestFillSprite(unittest.TestCase):
         script_arg = mock_docker.call_args[0][0]
         self.assertIn("clear", script_arg)
         self.assertIn("0, 0, 255", script_arg)
+
+
+class TestDrawImage(unittest.TestCase):
+    """Test the draw_image tool."""
+
+    def test_invalid_width(self):
+        result = draw_image(0, 2, '["ff0000","00ff00"]')
+        self.assertIn("Error", result)
+
+    def test_invalid_height(self):
+        result = draw_image(2, 0, '["ff0000","00ff00"]')
+        self.assertIn("Error", result)
+
+    def test_invalid_json(self):
+        result = draw_image(2, 2, "not json")
+        self.assertIn("Error", result)
+
+    def test_wrong_pixel_count(self):
+        result = draw_image(2, 2, '["ff0000","00ff00","0000ff"]')
+        self.assertIn("expected 4", result)
+
+    def test_invalid_color_in_array(self):
+        result = draw_image(2, 1, '["ff0000","xyz"]')
+        self.assertIn("Error", result)
+
+    def test_non_array_json(self):
+        result = draw_image(1, 1, '{"color":"ff0000"}')
+        self.assertIn("Error", result)
+
+    @patch("server._run_script_docker")
+    def test_transparent_pixel(self, mock_docker):
+        """The '.' sentinel should be treated as transparent."""
+        mock_docker.return_value = "ok"
+        # Validation should pass — '.' is a valid transparent pixel.
+        result = draw_image(1, 1, '["."]')
+        # Should not raise a colour-validation error.
+        self.assertNotIn("Invalid", result)
+
+    @patch("server._run_script_docker")
+    def test_transparent_pixel_generates_zeros(self, mock_docker):
+        """Transparent '.' pixels should produce 0,0,0,0 RGBA values."""
+        mock_docker.return_value = "ok"
+        draw_image(1, 1, '["."]')
+        script_arg = mock_docker.call_args[0][0]
+        self.assertIn("0,0,0,0", script_arg)
+
+    @patch("server._run_script_docker")
+    def test_valid_image_calls_run_script(self, mock_docker):
+        mock_docker.return_value = "Drew image: 2x2 (4 pixels)"
+        result = draw_image(
+            2, 2, '["ff0000","00ff00","0000ff","ffff00"]'
+        )
+        self.assertTrue(mock_docker.called)
+        script_arg = mock_docker.call_args[0][0]
+        self.assertIn("putImageData", script_arg)
+        self.assertIn("NewFile", script_arg)
+        self.assertIn("Uint8Array", script_arg)
+        # Check that RGBA values appear (ff0000 → 255,0,0,255)
+        self.assertIn("255,0,0,255", script_arg)
+
+    @patch("server._run_script_docker")
+    def test_uses_put_image_data_not_put_pixel(self, mock_docker):
+        """draw_image must use putImageData for efficiency, not putPixel."""
+        mock_docker.return_value = "ok"
+        draw_image(2, 1, '["ff0000","00ff00"]')
+        script_arg = mock_docker.call_args[0][0]
+        self.assertIn("putImageData", script_arg)
+        self.assertNotIn("putPixel", script_arg)
 
 
 class TestGetSpriteInfo(unittest.TestCase):
