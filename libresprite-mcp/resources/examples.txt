@@ -278,3 +278,133 @@ for (var y = 0; y < pattern.length; ++y) {
     }
 }
 ```
+
+---
+
+## Example 16: Draw a dragon sprite (64×64) using the AGENT_GUIDE template
+
+This example follows the AGENT_GUIDE.md template exactly: creates a 64×64 canvas,
+uses the `px()`, `rect()`, and `circle()` helpers, and draws a side-view dragon
+with body, wings, legs, tail, eye, horns, and fire breath.
+
+```javascript
+app.command.setParameter("width", "64");
+app.command.setParameter("height", "64");
+app.command.setParameter("colorMode", "rgb");
+app.command.NewFile();
+app.command.clearParameters();
+
+var col = app.pixelColor;
+var img = app.activeImage;
+var W = 64, H = 64;
+img.clear(col.rgba(0, 0, 0, 0));
+
+function px(x, y, c) {
+    if (x >= 0 && x < W && y >= 0 && y < H) img.putPixel(x, y, c);
+}
+function rect(x, y, w, h, c) {
+    for (var j = y; j < y + h; j++)
+        for (var i = x; i < x + w; i++)
+            px(i, j, c);
+}
+function circle(cx, cy, r, c) {
+    for (var j = cy - r; j <= cy + r; j++)
+        for (var i = cx - r; i <= cx + r; i++)
+            if ((i - cx) * (i - cx) + (j - cy) * (j - cy) <= r * r)
+                px(i, j, c);
+}
+
+// --- Define colors ---
+var darkGreen   = col.rgba(34, 120, 50, 255);
+var green       = col.rgba(50, 168, 70, 255);
+var lightGreen  = col.rgba(100, 200, 110, 255);
+var belly       = col.rgba(210, 190, 100, 255);
+var wingMem     = col.rgba(80, 170, 140, 255);
+var wingEdge    = col.rgba(34, 100, 60, 255);
+var eyeYellow   = col.rgba(255, 220, 30, 255);
+var pupil       = col.rgba(20, 20, 20, 255);
+var horn        = col.rgba(180, 160, 80, 255);
+var fireOrange  = col.rgba(255, 140, 0, 255);
+var fireYellow  = col.rgba(255, 220, 50, 255);
+var fireRed     = col.rgba(220, 50, 20, 255);
+var claw        = col.rgba(160, 150, 120, 255);
+
+// --- Body (torso) ---
+rect(18, 30, 20, 12, green);
+rect(20, 28, 16, 2, green);
+rect(20, 42, 14, 2, green);
+
+// --- Belly highlight ---
+rect(20, 34, 14, 6, belly);
+
+// --- Head ---
+circle(14, 26, 7, green);
+circle(14, 26, 5, lightGreen);
+
+// --- Eye ---
+px(11, 24, eyeYellow);
+px(12, 24, eyeYellow);
+px(11, 25, eyeYellow);
+px(12, 25, pupil);
+
+// --- Nostril ---
+px(8, 27, darkGreen);
+
+// --- Horns ---
+px(15, 18, horn);
+px(16, 17, horn);
+px(17, 16, horn);
+px(18, 19, horn);
+px(19, 18, horn);
+
+// --- Neck ---
+rect(18, 24, 6, 6, green);
+rect(19, 26, 4, 4, lightGreen);
+
+// --- Tail ---
+rect(38, 32, 6, 4, green);
+rect(44, 33, 5, 3, green);
+rect(49, 34, 4, 2, darkGreen);
+rect(53, 33, 3, 2, darkGreen);
+rect(56, 32, 2, 2, darkGreen);
+// Tail tip
+px(58, 31, darkGreen);
+px(58, 32, darkGreen);
+
+// --- Wing (membrane) ---
+rect(22, 14, 14, 12, wingMem);
+// Wing edge (top)
+rect(22, 13, 14, 1, wingEdge);
+rect(22, 14, 1, 12, wingEdge);
+// Wing bone spars
+rect(22, 14, 1, 12, wingEdge);
+rect(28, 14, 1, 10, wingEdge);
+rect(34, 14, 1, 8, wingEdge);
+// Wing tip
+px(36, 13, wingEdge);
+px(37, 12, wingEdge);
+
+// --- Front leg ---
+rect(22, 42, 3, 8, green);
+rect(21, 50, 5, 2, green);
+// Claws
+px(20, 51, claw);
+px(26, 51, claw);
+
+// --- Back leg ---
+rect(33, 42, 4, 7, green);
+rect(32, 49, 6, 2, green);
+// Claws
+px(31, 50, claw);
+px(38, 50, claw);
+
+// --- Fire breath ---
+rect(3, 24, 5, 2, fireOrange);
+rect(1, 25, 3, 1, fireYellow);
+rect(5, 23, 3, 3, fireRed);
+px(0, 25, fireYellow);
+px(1, 24, fireOrange);
+px(2, 23, fireRed);
+
+console.log("Done! Dragon sprite created.");
+```
