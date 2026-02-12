@@ -1,4 +1,5 @@
 services:
+  # Docker mode: headless LibreSprite in container (default)
   libresprite-mcp:
     build: .
     volumes:
@@ -13,3 +14,21 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
+
+  # Relay mode: container acts as MCP relay to an external LibreSprite
+  # Usage: docker compose run --service-ports libresprite-mcp-relay
+  libresprite-mcp-relay:
+    build: .
+    ports:
+      - "${LIBRESPRITE_RELAY_PORT:-64823}:64823"
+    stdin_open: true
+    environment:
+      - LIBRESPRITE_MODE=relay
+      # Bind to all interfaces so the host can reach the relay
+      - LIBRESPRITE_RELAY_HOST=0.0.0.0
+      - LIBRESPRITE_RELAY_PORT=64823
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
