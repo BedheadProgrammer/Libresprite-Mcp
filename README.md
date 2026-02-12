@@ -179,7 +179,7 @@ docker compose run --service-ports libresprite-mcp-relay
 
 ### Connect LibreSprite
 
-1. Copy `remote/mcp.js` into your LibreSprite scripts folder (same as Relay Mode above).
+1. Copy `remote/mcp.js` into your LibreSprite scripts folder (see paths under [Relay Mode setup](#2-set-up-the-libresprite-remote-script)).
 2. Open LibreSprite on the host.
 3. Run the `mcp.js` script from the Scripts menu and click **Connect**.
 
