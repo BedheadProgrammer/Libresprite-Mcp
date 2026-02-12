@@ -162,26 +162,116 @@ class LibrespriteProxy:
 # ---------------------------------------------------------------------------
 
 
+def _create_blank_png(path: str, width: int = 64, height: int = 64) -> None:
+    """Create a minimal transparent RGBA PNG at *path*.
+
+    Uses only the stdlib (struct + zlib) so Pillow is not required.
+    """
+    import struct
+    import zlib
+
+    # Raw scanlines: filter-byte 0 + width×4 zero bytes per row
+    scanlines = b""
+    for _ in range(height):
+        scanlines += b"\x00" + b"\x00\x00\x00\x00" * width
+    compressed = zlib.compress(scanlines)
+
+    def _chunk(ctype: bytes, data: bytes) -> bytes:
+        c = ctype + data
+        crc = zlib.crc32(c) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", crc)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    png = b"\x89PNG\r\n\x1a\n"
+    png += _chunk(b"IHDR", ihdr)
+    png += _chunk(b"IDAT", compressed)
+    png += _chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+# Default canvas size used when no sprite is loaded in Docker mode.
+_DEFAULT_CANVAS = 64
+
+
 def _run_script_docker(js_code: str) -> str:
-    """Execute *js_code* inside LibreSprite running in headless Docker mode."""
+    """Execute *js_code* inside LibreSprite running in headless Docker mode.
+
+    In batch mode ``app.activeSprite`` / ``app.activeImage`` are
+    unavailable because there is no UI editor.  To work around this
+    the wrapper:
+
+    1. Creates a blank PNG on disk.
+    2. Passes it to LibreSprite as a file argument so it is loaded.
+    3. In the script preamble, opens the file via ``app.open()`` which
+       *does* return a usable Document even in batch mode, then
+       exposes the familiar ``app.activeSprite`` / ``app.activeImage``
+       variables so user code works unchanged.
+    """
     if not js_code or not js_code.strip():
         return "Error: script must not be empty."
 
     script_id = str(uuid.uuid4())
     script_path = f"/tmp/{script_id}.js"
+    blank_path = f"/tmp/{script_id}_blank.png"
     output_filename = f"{script_id}.png"
     output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-    # Wrap user code with an auto-save footer.
+    # Detect canvas size from NewFile parameters if present
+    canvas_w = _DEFAULT_CANVAS
+    canvas_h = _DEFAULT_CANVAS
+    # Try to extract width/height from setParameter calls in the user code
+    import re
+    w_match = re.search(
+        r'setParameter\s*\(\s*["\']width["\']\s*,\s*["\'](\d+)["\']\s*\)',
+        js_code,
+    )
+    h_match = re.search(
+        r'setParameter\s*\(\s*["\']height["\']\s*,\s*["\'](\d+)["\']\s*\)',
+        js_code,
+    )
+    if w_match:
+        canvas_w = int(w_match.group(1))
+    if h_match:
+        canvas_h = int(h_match.group(1))
+
+    # Strip NewFile-related commands since we create the file ourselves.
+    cleaned = js_code
+    cleaned = re.sub(
+        r'app\.command\.setParameter\s*\(\s*["\'](?:width|height|colorMode)["\']\s*,\s*["\'][^"\']*["\']\s*\)\s*;?\s*\n?',
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r'app\.command\.NewFile\s*\(\s*\)\s*;?\s*\n?', "", cleaned
+    )
+    cleaned = re.sub(
+        r'app\.command\.clearParameters\s*\(\s*\)\s*;?\s*\n?', "", cleaned
+    )
+
+    _create_blank_png(blank_path, canvas_w, canvas_h)
+
+    # Wrap user code: open the blank sprite via app.open() which returns
+    # a Document even in batch mode, then alias the familiar globals.
+    # Replace app.activeSprite/activeImage references since those are
+    # read-only getters that return null in batch mode.
+    cleaned = cleaned.replace("app.activeImage", "__img")
+    cleaned = cleaned.replace("app.activeSprite", "__sprite")
+
     wrapped = (
         f"// === AUTO-GENERATED WRAPPER ===\n"
-        f'var OUTPUT_PATH = "{output_path}";\n\n'
+        f'var OUTPUT_PATH = "{output_path}";\n'
+        f'var __doc = app.open("{blank_path}");\n'
+        f"var __sprite = __doc ? __doc.sprite : null;\n"
+        f"var __layer  = __sprite ? __sprite.layer(0) : null;\n"
+        f"var __cel    = __layer  ? __layer.cel(0)     : null;\n"
+        f"var __img    = __cel    ? __cel.image         : null;\n\n"
         f"// === USER CODE START ===\n"
-        f"{js_code}\n"
+        f"{cleaned}\n"
         f"// === USER CODE END ===\n\n"
         f"// === AUTO-SAVE FOOTER ===\n"
-        f"if (app.activeSprite) {{\n"
-        f"    app.activeSprite.saveAs(OUTPUT_PATH, true);\n"
+        f"if (__sprite) {{\n"
+        f"    __sprite.saveAs(OUTPUT_PATH, true);\n"
         f"}}\n"
     )
 
@@ -190,7 +280,8 @@ def _run_script_docker(js_code: str) -> str:
             f.write(wrapped)
 
         result = subprocess.run(
-            [LIBRESPRITE_BIN, "--batch", "--script", script_path],
+            [LIBRESPRITE_BIN, "--batch", blank_path,
+             "--script", script_path],
             capture_output=True,
             text=True,
             timeout=SCRIPT_TIMEOUT,
@@ -214,8 +305,9 @@ def _run_script_docker(js_code: str) -> str:
     except subprocess.TimeoutExpired:
         return f"Error: Script execution timed out after {SCRIPT_TIMEOUT}s."
     finally:
-        if os.path.exists(script_path):
-            os.remove(script_path)
+        for p in (script_path, blank_path):
+            if os.path.exists(p):
+                os.remove(p)
 
 
 # ---------------------------------------------------------------------------

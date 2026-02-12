@@ -1,0 +1,14 @@
+{
+    "mcp": {
+        "servers": {
+            "libresprite": {
+                "command": "docker",
+                "args": [
+                    "run", "--rm", "-i",
+                    "-v", "c:/Users/extvf/OneDrive/Documents/Libresprite-Mcp/libresprite-mcp/output:/app/output",
+                    "libresprite-mcp"
+                ]
+            }
+        }
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "libresprite": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-v",
+        "${workspaceFolder}/libresprite-mcp/output:/app/output",
+        "libresprite-mcp"
+      ]
+    }
+  }
+}
