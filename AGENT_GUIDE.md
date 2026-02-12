@@ -7,7 +7,9 @@ When the user asks you to create a sprite, call the `mcp_libresprite_run_script`
 1. User says "Create X sprite"
 2. You call `mcp_libresprite_run_script` with the `script` parameter containing JavaScript
 3. The server returns the output PNG path
-4. Tell the user it's done
+4. Call `mcp_libresprite_screenshot` to see the sprite you just created
+5. Evaluate the result — if it looks wrong, fix it with `mcp_libresprite_set_pixels` or another tool
+6. Call `mcp_libresprite_screenshot` again to verify, then tell the user it's done
 
 ## Template
 
