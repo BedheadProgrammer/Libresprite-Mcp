@@ -33,7 +33,8 @@ RUN wget -q https://github.com/LibreSprite/LibreSprite/releases/download/v1.2/Li
     && ln -s /app/bin/libresprite/bin/libresprite /usr/local/bin/libresprite
 
 # 3. Install Python MCP SDK (with CLI extras for FastMCP transport support)
-RUN pip install --no-cache-dir "mcp[cli]"
+#    Flask is needed for relay mode's HTTP relay server.
+RUN pip install --no-cache-dir "mcp[cli]" flask
 
 # 4. Setup Working Directory and output directory
 WORKDIR /app
@@ -51,8 +52,13 @@ RUN useradd -m spriteuser \
 USER spriteuser
 
 # 6. Env vars to force headless execution and docker mode
+#    LIBRESPRITE_MODE defaults to "docker" but can be overridden at runtime
+#    with "relay" to use the container as an MCP relay server.
 ENV DISPLAY=:99
 ENV LIBRESPRITE_MODE=docker
 
-# 7. Start command: Run Xvfb in background, then the Python Server
+# 7. Expose relay port so LibreSprite on the host can connect in relay mode
+EXPOSE 64823
+
+# 8. Start command: Run Xvfb in background, then the Python Server
 CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & while ! test -e /tmp/.X99-lock; do sleep 0.1; done && python server.py"]

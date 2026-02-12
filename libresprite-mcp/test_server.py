@@ -600,5 +600,46 @@ class TestPromptMentionsScreenshot(unittest.TestCase):
         self.assertIn("VISUAL FEEDBACK", result)
 
 
+class TestRelayProxyInit(unittest.TestCase):
+    """Test that the relay proxy can be configured for container use."""
+
+    def test_proxy_accepts_all_interfaces_host(self):
+        """Relay mode in a container binds to 0.0.0.0 to accept connections."""
+        from server import LibrespriteProxy
+
+        proxy = LibrespriteProxy(host="0.0.0.0", port=64823)
+        self.assertEqual(proxy.host, "0.0.0.0")
+        self.assertEqual(proxy.port, 64823)
+
+    def test_proxy_default_host_is_localhost(self):
+        from server import LibrespriteProxy
+
+        proxy = LibrespriteProxy()
+        self.assertEqual(proxy.host, "localhost")
+        self.assertEqual(proxy.port, 64823)
+
+    def test_proxy_custom_port(self):
+        from server import LibrespriteProxy
+
+        proxy = LibrespriteProxy(host="0.0.0.0", port=9999)
+        self.assertEqual(proxy.port, 9999)
+
+    def test_proxy_has_flask_app(self):
+        from server import LibrespriteProxy
+
+        proxy = LibrespriteProxy(host="0.0.0.0", port=64823)
+        self.assertIsNotNone(proxy.app)
+
+    def test_proxy_ping_endpoint(self):
+        """The /ping endpoint should return a pong status."""
+        from server import LibrespriteProxy
+
+        proxy = LibrespriteProxy(host="0.0.0.0", port=64823)
+        with proxy.app.test_client() as client:
+            resp = client.get("/ping")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.get_json(), {"status": "pong"})
+
+
 if __name__ == "__main__":
     unittest.main()
