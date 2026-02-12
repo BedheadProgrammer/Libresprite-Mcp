@@ -143,8 +143,9 @@ docker run --rm -i -v "$(pwd)/output:/app/output" libresprite-mcp
 
 | Tool | Description | Modes |
 |------|-------------|-------|
+| `draw_image(width, height, pixel_colors)` | **Primary tool.** Draw a complete sprite by providing every pixel colour as a flat JSON array of hex strings. A 64×64 image ≈ 10 k tokens. | relay, docker |
 | `create_sprite(width, height)` | Create a new empty sprite with the given dimensions. | relay, docker |
-| `set_pixels(pixels)` | Set individual pixels by coordinate and hex colour (JSON array). **Primary drawing tool.** | relay, docker |
+| `set_pixels(pixels)` | Set a sparse set of individual pixels by coordinate and hex colour (JSON array). | relay, docker |
 | `draw_rect(x, y, width, height, color)` | Draw a filled rectangle on the active image. | relay, docker |
 | `fill_sprite(color)` | Fill the entire active image with a single colour. | relay, docker |
 | `create_pixel_art(width, height, pixel_data, palette?)` | Create sprites from a simple text-based pixel map without writing code. | relay, docker |
