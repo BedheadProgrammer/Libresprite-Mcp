@@ -143,8 +143,12 @@ docker run --rm -i -v "$(pwd)/output:/app/output" libresprite-mcp
 
 | Tool | Description | Modes |
 |------|-------------|-------|
-| `run_script(script)` | Execute JavaScript in LibreSprite. Read the API docs first via the `docs://reference` and `docs://examples` resources. | relay, docker |
+| `create_sprite(width, height)` | Create a new empty sprite with the given dimensions. | relay, docker |
+| `set_pixels(pixels)` | Set individual pixels by coordinate and hex colour (JSON array). **Primary drawing tool.** | relay, docker |
+| `draw_rect(x, y, width, height, color)` | Draw a filled rectangle on the active image. | relay, docker |
+| `fill_sprite(color)` | Fill the entire active image with a single colour. | relay, docker |
 | `create_pixel_art(width, height, pixel_data, palette?)` | Create sprites from a simple text-based pixel map without writing code. | relay, docker |
+| `run_script(script)` | Execute JavaScript in LibreSprite. **Advanced** — use the tools above for standard tasks. Read the API docs first via the `docs://reference` and `docs://examples` resources. | relay, docker |
 | `list_sprites()` | List all generated sprite files in the output directory. | docker |
 | `get_sprite_info()` | Get info about the active sprite (width, height, layers, etc.). | relay |
 | `get_pixel_data(x, y, width?, height?)` | Read pixel colour data from the active image. | relay |

@@ -266,19 +266,22 @@ def libresprite(prompt: str) -> str:
     """
     return (
         "LibreSprite is a program for creating and editing pixel art and "
-        "animations using JavaScript.\n\n"
-        "Before proceeding, please ensure you are well versed with the "
-        "documentation and examples provided in the resources "
-        "`docs://reference` and `docs://examples`.\n\n"
-        "You can use the `run_script` tool to execute JavaScript scripts "
-        "in the context of LibreSprite.\n\n"
-        "IMPORTANT NOTES:\n"
-        "- LibreSprite uses a JavaScript scripting API (NOT Lua).\n"
-        "- Use `app.pixelColor.rgba(r, g, b, a)` to create colors.\n"
-        "- Use `app.activeImage.putPixel(x, y, color)` to draw pixels.\n"
-        "- Use `console.log(...)` to output information.\n"
-        "- The active image is accessed via `app.activeImage`.\n"
-        "- The active sprite is accessed via `app.activeSprite`.\n\n"
+        "animations.\n\n"
+        "PREFERRED WORKFLOW — use the declarative tools to build pixel art "
+        "directly without writing code:\n"
+        "1. `create_sprite(width, height)` — create a new sprite.\n"
+        "2. `set_pixels(pixels)` — place pixels by coordinate and hex "
+        "colour.  This is the primary drawing tool.\n"
+        "3. `draw_rect(x, y, width, height, color)` — draw a filled "
+        "rectangle.\n"
+        "4. `fill_sprite(color)` — fill the entire image with a colour.\n"
+        "5. `create_pixel_art(width, height, pixel_data, palette?)` — "
+        "create sprites from a text-based pixel map.\n\n"
+        "Only fall back to `run_script` for advanced operations that the "
+        "declarative tools cannot handle (e.g. animation frames, layers, "
+        "palette manipulation, or complex procedural generation).  If you "
+        "do use `run_script`, read `docs://reference` and "
+        "`docs://examples` first.\n\n"
         f"Here's what you need to do:\n\n{prompt}"
     )
 
@@ -289,6 +292,12 @@ def libresprite(prompt: str) -> str:
 @mcp.tool()
 def run_script(script: str) -> str:
     """Execute a JavaScript script inside LibreSprite.
+
+    **Advanced tool** — prefer the declarative tools (``create_sprite``,
+    ``set_pixels``, ``draw_rect``, ``fill_sprite``, ``create_pixel_art``)
+    for standard pixel-art tasks.  Use ``run_script`` only when you need
+    capabilities not covered by those tools (e.g. animation frames, layers,
+    palette manipulation, or complex procedural generation).
 
     IMPORTANT: Read the resources `docs://reference` and `docs://examples`
     first to understand the available API.
@@ -495,6 +504,175 @@ def get_pixel_data(x: int, y: int, width: int = 1, height: int = 1) -> str:
         "}\n"
     )
     return run_script(script)
+
+
+# -- Declarative pixel-art tools -------------------------------------------
+
+
+def _parse_hex_color(hex_str: str) -> tuple[int, int, int, int] | str:
+    """Parse a hex colour string into (r, g, b, a).
+
+    Accepts ``#RRGGBB``, ``RRGGBB``, ``#RRGGBBAA``, or ``RRGGBBAA``.
+    Returns a tuple on success or an error string on failure.
+    """
+    h = hex_str.strip().lstrip("#")
+    if len(h) not in (6, 8) or not all(c in "0123456789abcdefABCDEF" for c in h):
+        return f"Invalid hex colour '{hex_str}'. Use RRGGBB or RRGGBBAA format."
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    a = int(h[6:8], 16) if len(h) == 8 else 255
+    return (r, g, b, a)
+
+
+@mcp.tool()
+def create_sprite(width: int, height: int) -> str:
+    """Create a new empty sprite with the given dimensions.
+
+    Call this before ``set_pixels``, ``draw_rect``, ``fill_sprite``, or
+    ``create_pixel_art`` when no sprite is open yet.
+
+    Args:
+        width:  Sprite width in pixels (1–256).
+        height: Sprite height in pixels (1–256).
+    """
+    if width < 1 or width > 256 or height < 1 or height > 256:
+        return "Error: width and height must be between 1 and 256."
+
+    js_code = (
+        f"app.command.NewFile();\n"
+        f"var s = app.activeSprite;\n"
+        f"if (s) {{\n"
+        f"    s.width = {width};\n"
+        f"    s.height = {height};\n"
+        f'    console.log("Created sprite: {width}x{height}");\n'
+        f"}} else {{\n"
+        f'    console.log("Error: could not create sprite.");\n'
+        f"}}\n"
+    )
+    return run_script(js_code)
+
+
+@mcp.tool()
+def set_pixels(pixels: str) -> str:
+    """Set individual pixels on the active image by specifying coordinates and
+    colours directly.
+
+    This is the **primary** tool for building pixel art.  The AI specifies
+    exactly which pixels to place and in what colour — no JavaScript required.
+
+    Args:
+        pixels: A JSON array of pixel objects.  Each object must have:
+                ``x`` (int), ``y`` (int), and ``color`` (hex string RRGGBB or
+                RRGGBBAA, with or without '#').
+                Example::
+
+                    [
+                      {"x": 0, "y": 0, "color": "#ff0000"},
+                      {"x": 1, "y": 0, "color": "#00ff00"},
+                      {"x": 2, "y": 0, "color": "0000ff"}
+                    ]
+    """
+    try:
+        data = json.loads(pixels)
+    except (json.JSONDecodeError, TypeError) as exc:
+        return f"Error: pixels must be a valid JSON array. ({exc})"
+
+    if not isinstance(data, list) or len(data) == 0:
+        return "Error: pixels must be a non-empty JSON array."
+
+    js_lines: list[str] = [
+        "var col = app.pixelColor;",
+        "var img = app.activeImage;",
+        "if (!img) { console.log('Error: no active image. "
+        "Use create_sprite first.'); }",
+        "else {",
+    ]
+
+    for i, px in enumerate(data):
+        if not isinstance(px, dict):
+            return f"Error: pixel at index {i} is not an object."
+        if "x" not in px or "y" not in px or "color" not in px:
+            return f"Error: pixel at index {i} must have 'x', 'y', and 'color'."
+        parsed = _parse_hex_color(str(px["color"]))
+        if isinstance(parsed, str):
+            return f"Error at pixel index {i}: {parsed}"
+        r, g, b, a = parsed
+        js_lines.append(
+            f"    img.putPixel({int(px['x'])}, {int(px['y'])}, "
+            f"col.rgba({r}, {g}, {b}, {a}));"
+        )
+
+    count = len(data)
+    js_lines.append(f'    console.log("Set {count} pixel(s).");')
+    js_lines.append("}")
+
+    return run_script("\n".join(js_lines))
+
+
+@mcp.tool()
+def draw_rect(
+    x: int, y: int, width: int, height: int, color: str
+) -> str:
+    """Draw a filled rectangle on the active image.
+
+    Args:
+        x:      X coordinate of the top-left corner.
+        y:      Y coordinate of the top-left corner.
+        width:  Rectangle width in pixels.
+        height: Rectangle height in pixels.
+        color:  Hex colour string (RRGGBB or RRGGBBAA, with or without '#').
+    """
+    if width < 1 or height < 1:
+        return "Error: width and height must be at least 1."
+
+    parsed = _parse_hex_color(color)
+    if isinstance(parsed, str):
+        return parsed
+    r, g, b, a = parsed
+
+    js_code = (
+        "var col = app.pixelColor;\n"
+        "var img = app.activeImage;\n"
+        "if (!img) { console.log('Error: no active image. "
+        "Use create_sprite first.'); }\n"
+        "else {\n"
+        f"    var c = col.rgba({r}, {g}, {b}, {a});\n"
+        f"    for (var py = {y}; py < {y + height}; py++) {{\n"
+        f"        for (var px = {x}; px < {x + width}; px++) {{\n"
+        "            img.putPixel(px, py, c);\n"
+        "        }\n"
+        "    }\n"
+        f'    console.log("Drew rectangle {width}x{height} at ({x},{y})");\n'
+        "}\n"
+    )
+    return run_script(js_code)
+
+
+@mcp.tool()
+def fill_sprite(color: str) -> str:
+    """Fill the entire active image with a single colour.
+
+    Args:
+        color: Hex colour string (RRGGBB or RRGGBBAA, with or without '#').
+               Use ``00000000`` for fully transparent.
+    """
+    parsed = _parse_hex_color(color)
+    if isinstance(parsed, str):
+        return parsed
+    r, g, b, a = parsed
+
+    js_code = (
+        "var col = app.pixelColor;\n"
+        "var img = app.activeImage;\n"
+        "if (!img) { console.log('Error: no active image. "
+        "Use create_sprite first.'); }\n"
+        "else {\n"
+        f"    img.clear(col.rgba({r}, {g}, {b}, {a}));\n"
+        f'    console.log("Filled sprite with #{color.strip().lstrip("#")}");\n'
+        "}\n"
+    )
+    return run_script(js_code)
 
 
 # ---------------------------------------------------------------------------
