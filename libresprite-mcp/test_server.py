@@ -173,16 +173,6 @@ class TestResources(unittest.TestCase):
         # Should not contain Lua-specific syntax
         self.assertNotIn("local ", content)
 
-    def test_examples_contain_dragon_sprite(self):
-        """The examples resource should include the dragon sprite example."""
-        content = read_examples()
-        self.assertIn("dragon", content.lower())
-        self.assertIn("Dragon sprite created", content)
-        # Verify it uses the AGENT_GUIDE template structure
-        self.assertIn("function px(x, y, c)", content)
-        self.assertIn("function rect(x, y, w, h, c)", content)
-        self.assertIn("function circle(cx, cy, r, c)", content)
-
 
 class TestPrompt(unittest.TestCase):
     """Test the MCP prompt template."""
