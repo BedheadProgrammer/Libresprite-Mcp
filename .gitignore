@@ -22,4 +22,14 @@ libresprite-mcp/test_scripts/
 Thumbs.db
 
 # IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
 .idea/
