@@ -12,7 +12,7 @@ An MCP server that lets AI assistants generate pixel-art sprites by driving [Lib
 ## Setup (Clone → Ready)
 
 ### Prerequisites
-
+- LibreSprite
 - [Docker Desktop](https://docs.docker.com/get-docker/)
 - An MCP-compatible AI client (VS Code w/ Copilot, Claude Code, Cursor, Claude Desktop)
 
